@@ -1,0 +1,722 @@
+diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/AppConfig.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/AppConfig.kt
+index 7ab21797..1aba545d 100644
+--- a/V2rayNG/app/src/main/java/com/v2ray/ang/AppConfig.kt
++++ b/V2rayNG/app/src/main/java/com/v2ray/ang/AppConfig.kt
+@@ -62,6 +62,9 @@ object AppConfig {
+     const val PREF_DOMESTIC_DNS = "pref_domestic_dns"
+     const val PREF_DNS_HOSTS = "pref_dns_hosts"
+     const val PREF_DELAY_TEST_URL = "pref_delay_test_url"
++    const val PREF_SPEED_TEST_URL = "pref_speed_test_url"
++    const val PREF_SPEED_TEST_TIMEOUT = "pref_speed_test_timeout"
++    const val PREF_SPEED_TEST_CONCURRENCY = "pref_speed_test_concurrency"
+     const val PREF_IP_API_URL = "pref_ip_api_url"
+     const val PREF_LOGLEVEL = "pref_core_loglevel"
+     const val PREF_OUTBOUND_DOMAIN_RESOLVE_METHOD = "pref_outbound_domain_resolve_method"
+@@ -120,6 +123,9 @@ object AppConfig {
+     const val TG_CHANNEL_URL = "https://t.me/github_2dust"
+     const val DELAY_TEST_URL = "https://www.gstatic.com/generate_204"
+     const val DELAY_TEST_URL2 = "https://www.google.com/generate_204"
++    const val SPEED_TEST_URL = "https://speed.cloudflare.com/__down?bytes=10000000,https://cachefly.cachefly.net/50mb.test"
++    const val SPEED_TEST_TIMEOUT = "15"
++    const val SPEED_TEST_CONCURRENCY = "4"
+ //    const val IP_API_URL = "https://speed.cloudflare.com/meta"
+     const val IP_API_URL = "https://api.ip.sb/geoip"
+
+@@ -164,6 +170,8 @@ object AppConfig {
+     const val MSG_MEASURE_CONFIG_CANCEL = 72
+     const val MSG_MEASURE_CONFIG_NOTIFY = 73
+     const val MSG_MEASURE_CONFIG_FINISH = 74
++    const val MSG_MEASURE_CONFIG_SPEED = 75
++    const val MSG_MEASURE_CONFIG_SPEED_SUCCESS = 76
+
+     /** Notification channel IDs and names. */
+     const val RAY_NG_CHANNEL_ID = "RAY_NG_M_CH_ID"
+diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/dto/ServerAffiliationInfo.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/dto/ServerAffiliationInfo.kt
+index bb4d20be..f37edc30 100644
+--- a/V2rayNG/app/src/main/java/com/v2ray/ang/dto/ServerAffiliationInfo.kt
++++ b/V2rayNG/app/src/main/java/com/v2ray/ang/dto/ServerAffiliationInfo.kt
+@@ -1,10 +1,24 @@
+ package com.v2ray.ang.dto
+
+-data class ServerAffiliationInfo(var testDelayMillis: Long = 0L) {
++data class ServerAffiliationInfo(
++    var testDelayMillis: Long = 0L,
++    var testSpeedMbps: Double = 0.0
++) {
+     fun getTestDelayString(): String {
+         if (testDelayMillis == 0L) {
+             return ""
+         }
+         return testDelayMillis.toString() + "ms"
+     }
++
++    fun getTestSpeedString(): String {
++        if (testSpeedMbps < 0.05) {
++            return ""
++        }
++        return if (testSpeedMbps >= 10.0) {
++            String.format("%.0f Mbps", testSpeedMbps)
++        } else {
++            String.format("%.1f Mbps", testSpeedMbps)
++        }
++    }
+ }
+diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/handler/MmkvManager.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/handler/MmkvManager.kt
+index c33b9ebd..c91e0aba 100644
+--- a/V2rayNG/app/src/main/java/com/v2ray/ang/handler/MmkvManager.kt
++++ b/V2rayNG/app/src/main/java/com/v2ray/ang/handler/MmkvManager.kt
+@@ -265,6 +265,15 @@ object MmkvManager {
+         serverAffStorage.encode(guid, JsonUtil.toJson(aff))
+     }
+
++    fun encodeServerTestSpeedMbps(guid: String, testResult: Double) {
++        if (guid.isBlank()) {
++            return
++        }
++        val aff = decodeServerAffiliationInfo(guid) ?: ServerAffiliationInfo()
++        aff.testSpeedMbps = testResult
++        serverAffStorage.encode(guid, JsonUtil.toJson(aff))
++    }
++
+     /**
+      * Clears all test delay results.
+      *
+@@ -279,6 +288,15 @@ object MmkvManager {
+         }
+     }
+
++    fun clearAllTestSpeedResults(keys: List<String>?) {
++        keys?.forEach { key ->
++            decodeServerAffiliationInfo(key)?.let { aff ->
++                aff.testSpeedMbps = 0.0
++                serverAffStorage.encode(key, JsonUtil.toJson(aff))
++            }
++        }
++    }
++
+     /**
+      * Removes all server configurations.
+      *
+diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/handler/SettingsManager.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/handler/SettingsManager.kt
+index 0acb5f45..fb2b96d8 100644
+--- a/V2rayNG/app/src/main/java/com/v2ray/ang/handler/SettingsManager.kt
++++ b/V2rayNG/app/src/main/java/com/v2ray/ang/handler/SettingsManager.kt
+@@ -362,6 +362,39 @@ object SettingsManager {
+         }
+     }
+
++    fun getSpeedTestUrl(): String {
++        return MmkvManager.decodeSettingsString(AppConfig.PREF_SPEED_TEST_URL)
++            ?.takeIf { it.isNotBlank() }
++            ?: AppConfig.SPEED_TEST_URL
++    }
++
++    fun getSpeedTestUrls(): List<String> {
++        val savedUrls = getSpeedTestUrl()
++            .split(",", "\n", ";")
++            .map { it.trim() }
++            .filter { it.isNotEmpty() }
++        val defaultUrls = AppConfig.SPEED_TEST_URL
++            .split(",")
++            .map { it.trim() }
++            .filter { it.isNotEmpty() }
++        return (savedUrls + defaultUrls).distinct()
++    }
++
++    fun getSpeedTestTimeoutMillis(): Int {
++        val seconds = Utils.parseInt(
++            MmkvManager.decodeSettingsString(AppConfig.PREF_SPEED_TEST_TIMEOUT),
++            AppConfig.SPEED_TEST_TIMEOUT.toInt()
++        ).coerceIn(3, 120)
++        return seconds * 1000
++    }
++
++    fun getSpeedTestConcurrency(): Int {
++        return Utils.parseInt(
++            MmkvManager.decodeSettingsString(AppConfig.PREF_SPEED_TEST_CONCURRENCY),
++            AppConfig.SPEED_TEST_CONCURRENCY.toInt()
++        ).coerceIn(1, 8)
++    }
++
+     /**
+      * Get the locale.
+      * @return The locale.
+@@ -446,6 +479,9 @@ object SettingsManager {
+         ensureDefaultValue(AppConfig.PREF_REMOTE_DNS, AppConfig.DNS_PROXY)
+         ensureDefaultValue(AppConfig.PREF_DOMESTIC_DNS, AppConfig.DNS_DIRECT)
+         ensureDefaultValue(AppConfig.PREF_DELAY_TEST_URL, AppConfig.DELAY_TEST_URL)
++        ensureDefaultValue(AppConfig.PREF_SPEED_TEST_URL, AppConfig.SPEED_TEST_URL)
++        ensureDefaultValue(AppConfig.PREF_SPEED_TEST_TIMEOUT, AppConfig.SPEED_TEST_TIMEOUT)
++        ensureDefaultValue(AppConfig.PREF_SPEED_TEST_CONCURRENCY, AppConfig.SPEED_TEST_CONCURRENCY)
+         ensureDefaultValue(AppConfig.PREF_IP_API_URL, AppConfig.IP_API_URL)
+         ensureDefaultValue(AppConfig.PREF_HEV_TUNNEL_RW_TIMEOUT, AppConfig.HEVTUN_RW_TIMEOUT)
+         ensureDefaultValue(AppConfig.PREF_MUX_CONCURRENCY, "8")
+diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/service/SpeedTestWorkerService.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/service/SpeedTestWorkerService.kt
+new file mode 100644
+index 00000000..ffc5b6c0
+--- /dev/null
++++ b/V2rayNG/app/src/main/java/com/v2ray/ang/service/SpeedTestWorkerService.kt
+@@ -0,0 +1,244 @@
++package com.v2ray.ang.service
++
++import android.content.Context
++import android.os.SystemClock
++import android.util.Log
++import com.google.gson.JsonArray
++import com.v2ray.ang.AppConfig
++import com.v2ray.ang.handler.SettingsManager
++import com.v2ray.ang.handler.V2RayNativeManager
++import com.v2ray.ang.handler.V2rayConfigManager
++import com.v2ray.ang.util.HttpUtil
++import com.v2ray.ang.util.JsonUtil
++import com.v2ray.ang.util.MessageUtil
++import kotlinx.coroutines.CancellationException
++import kotlinx.coroutines.CoroutineName
++import kotlinx.coroutines.CoroutineScope
++import kotlinx.coroutines.SupervisorJob
++import kotlinx.coroutines.asCoroutineDispatcher
++import kotlinx.coroutines.currentCoroutineContext
++import kotlinx.coroutines.delay
++import kotlinx.coroutines.isActive
++import kotlinx.coroutines.joinAll
++import kotlinx.coroutines.launch
++import kotlinx.coroutines.sync.Semaphore
++import kotlinx.coroutines.sync.withPermit
++import libv2ray.CoreCallbackHandler
++import java.io.IOException
++import java.net.HttpURLConnection
++import java.net.ServerSocket
++import java.util.Collections
++import java.util.concurrent.Executors
++import java.util.concurrent.atomic.AtomicInteger
++
++class SpeedTestWorkerService(
++    private val context: Context,
++    private val guids: List<String>,
++    private val onFinish: (status: String) -> Unit = {}
++) {
++    private val job = SupervisorJob()
++    private val cpu = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
++    private val dispatcher = Executors.newFixedThreadPool(cpu * 4).asCoroutineDispatcher()
++    private val scope = CoroutineScope(job + dispatcher + CoroutineName("SpeedTestBatchWorker"))
++
++    private val runningDelayCount = AtomicInteger(0)
++    private val totalDelayCount = AtomicInteger(0)
++
++    fun start() {
++        val speedGuids = Collections.synchronizedList(mutableListOf<String>())
++        val delayJobs = guids.map { guid ->
++            totalDelayCount.incrementAndGet()
++            scope.launch {
++                runningDelayCount.incrementAndGet()
++                try {
++                    val delay = startRealPing(guid)
++                    MessageUtil.sendMsg2UI(context, AppConfig.MSG_MEASURE_CONFIG_SUCCESS, Pair(guid, delay))
++                    if (delay > 0L) {
++                        speedGuids.add(guid)
++                    }
++                } finally {
++                    val count = totalDelayCount.decrementAndGet()
++                    val left = runningDelayCount.decrementAndGet()
++                    MessageUtil.sendMsg2UI(context, AppConfig.MSG_MEASURE_CONFIG_NOTIFY, "$left / $count")
++                }
++            }
++        }
++
++        scope.launch {
++            try {
++                joinAll(*delayJobs.toTypedArray())
++                runSpeedTests(speedGuids.toList())
++                onFinish("0")
++            } catch (_: CancellationException) {
++                onFinish("-1")
++            } finally {
++                close()
++            }
++        }
++    }
++
++    fun cancel() {
++        job.cancel()
++    }
++
++    private suspend fun runSpeedTests(speedGuids: List<String>) {
++        val doneCount = AtomicInteger(0)
++        val semaphore = Semaphore(SettingsManager.getSpeedTestConcurrency())
++        val jobs = speedGuids.map { guid ->
++            scope.launch {
++                semaphore.withPermit {
++                    if (!currentCoroutineContext().isActive) {
++                        return@withPermit
++                    }
++
++                    val speed = startDownloadSpeedTest(guid)
++                    MessageUtil.sendMsg2UI(context, AppConfig.MSG_MEASURE_CONFIG_SPEED_SUCCESS, Pair(guid, speed))
++                    val done = doneCount.incrementAndGet()
++                    MessageUtil.sendMsg2UI(
++                        context,
++                        AppConfig.MSG_MEASURE_CONFIG_NOTIFY,
++                        "$done / ${speedGuids.size}"
++                    )
++                }
++            }
++        }
++        joinAll(*jobs.toTypedArray())
++    }
++
++    private fun close() {
++        try {
++            dispatcher.close()
++        } catch (_: Throwable) {
++            // ignore
++        }
++    }
++
++    private fun startRealPing(guid: String): Long {
++        val configResult = V2rayConfigManager.getV2rayConfig4Speedtest(context, guid)
++        if (!configResult.status) {
++            return -1L
++        }
++        return V2RayNativeManager.measureOutboundDelay(configResult.content, SettingsManager.getDelayTestUrl())
++    }
++
++    private suspend fun startDownloadSpeedTest(guid: String): Double {
++        val configResult = V2rayConfigManager.getV2rayConfig4Speedtest(context, guid)
++        if (!configResult.status) {
++            return 0.0
++        }
++
++        val port = findFreePort()
++        val config = addHttpInbound(configResult.content, port) ?: return 0.0
++        val controller = V2RayNativeManager.newCoreController(SpeedTestCoreCallback())
++        return try {
++            controller.startLoop(config, 0)
++            delay(600)
++            if (!controller.isRunning) {
++                Log.w(AppConfig.TAG, "Speed test core did not start for $guid")
++                return 0.0
++            }
++            for (url in SettingsManager.getSpeedTestUrls()) {
++                val speed = downloadViaProxy(port, url)
++                if (speed > 0.0) {
++                    return speed
++                }
++            }
++            0.0
++        } catch (e: Exception) {
++            Log.e(AppConfig.TAG, "Speed test failed for $guid", e)
++            0.0
++        } finally {
++            try {
++                controller.stopLoop()
++            } catch (e: Exception) {
++                Log.e(AppConfig.TAG, "Failed to stop speed test core", e)
++            }
++        }
++    }
++
++    private fun downloadViaProxy(port: Int, url: String): Double {
++        val timeout = SettingsManager.getSpeedTestTimeoutMillis()
++        val conn = HttpUtil.createProxyConnection(
++            url,
++            port,
++            timeout,
++            timeout,
++            true
++        ) ?: return 0.0
++
++        var totalBytes = 0L
++        val started = SystemClock.elapsedRealtime()
++        return try {
++            conn.connect()
++            val responseCode = conn.responseCode
++            if (responseCode !in HTTP_SUCCESS_CODES) {
++                Log.w(AppConfig.TAG, "Speed test URL returned HTTP $responseCode: $url")
++                return 0.0
++            }
++            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
++            conn.inputStream.use { input ->
++                while (job.isActive && input.read(buffer).also { if (it > 0) totalBytes += it } != -1) {
++                    val elapsed = SystemClock.elapsedRealtime() - started
++                    if (elapsed >= timeout || totalBytes >= MAX_DOWNLOAD_BYTES) {
++                        break
++                    }
++                }
++            }
++            if (totalBytes < MIN_DOWNLOAD_BYTES) {
++                Log.w(AppConfig.TAG, "Speed test URL returned only $totalBytes bytes: $url")
++                return 0.0
++            }
++            val elapsedSeconds = ((SystemClock.elapsedRealtime() - started).coerceAtLeast(1L)) / 1000.0
++            (totalBytes * 8.0) / elapsedSeconds / 1_000_000.0
++        } catch (e: IOException) {
++            Log.e(AppConfig.TAG, "Speed test download failed for $url", e)
++            0.0
++        } catch (e: Exception) {
++            Log.e(AppConfig.TAG, "Speed test download failed for $url", e)
++            0.0
++        } finally {
++            conn.disconnect()
++        }
++    }
++
++    private fun addHttpInbound(config: String, port: Int): String? {
++        val json = JsonUtil.parseString(config) ?: return null
++        val inbounds = JsonArray()
++        val inbound = JsonUtil.parseString(
++            """
++            {
++              "tag": "speedtest-http",
++              "listen": "${AppConfig.LOOPBACK}",
++              "port": $port,
++              "protocol": "http",
++              "settings": {
++                "timeout": 0,
++                "userLevel": 8
++              }
++            }
++            """.trimIndent()
++        ) ?: return null
++        inbounds.add(inbound)
++        json.add("inbounds", inbounds)
++        return JsonUtil.toJsonPretty(json)
++    }
++
++    private fun findFreePort(): Int {
++        ServerSocket(0).use { socket ->
++            socket.reuseAddress = true
++            return socket.localPort
++        }
++    }
++
++    private class SpeedTestCoreCallback : CoreCallbackHandler {
++        override fun startup(): Long = 0
++        override fun shutdown(): Long = 0
++        override fun onEmitStatus(l: Long, s: String?): Long = 0
++    }
++
++    companion object {
++        private const val MAX_DOWNLOAD_BYTES = 50L * 1024L * 1024L
++        private const val MIN_DOWNLOAD_BYTES = 256L * 1024L
++        private val HTTP_SUCCESS_CODES = HttpURLConnection.HTTP_OK..299
++    }
++}
+diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/service/V2RayTestService.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/service/V2RayTestService.kt
+index 179f8e25..ed0f1b17 100644
+--- a/V2rayNG/app/src/main/java/com/v2ray/ang/service/V2RayTestService.kt
++++ b/V2rayNG/app/src/main/java/com/v2ray/ang/service/V2RayTestService.kt
+@@ -6,6 +6,7 @@ import android.os.IBinder
+ import com.v2ray.ang.AppConfig
+ import com.v2ray.ang.AppConfig.MSG_MEASURE_CONFIG
+ import com.v2ray.ang.AppConfig.MSG_MEASURE_CONFIG_CANCEL
++import com.v2ray.ang.AppConfig.MSG_MEASURE_CONFIG_SPEED
+ import com.v2ray.ang.dto.TestServiceMessage
+ import com.v2ray.ang.extension.serializable
+ import com.v2ray.ang.handler.MmkvManager
+@@ -16,7 +17,8 @@ import java.util.Collections
+ class V2RayTestService : Service() {
+
+     // manage active batch workers so each batch is independent and cancellable
+-    private val activeWorkers = Collections.synchronizedList(mutableListOf<RealPingWorkerService>())
++    private val activeRealPingWorkers = Collections.synchronizedList(mutableListOf<RealPingWorkerService>())
++    private val activeSpeedTestWorkers = Collections.synchronizedList(mutableListOf<SpeedTestWorkerService>())
+
+     /**
+      * Initializes the V2Ray environment.
+@@ -41,9 +43,7 @@ class V2RayTestService : Service() {
+     override fun onDestroy() {
+         super.onDestroy()
+         // cancel any active workers
+-        val snapshot = ArrayList(activeWorkers)
+-        snapshot.forEach { it.cancel() }
+-        activeWorkers.clear()
++        cancelAllWorkers()
+     }
+
+     /**
+@@ -70,20 +70,47 @@ class V2RayTestService : Service() {
+                     worker = RealPingWorkerService(this, guidsList) { status ->
+                         // notify UI and remove the worker from active list when finished
+                         MessageUtil.sendMsg2UI(this@V2RayTestService, AppConfig.MSG_MEASURE_CONFIG_FINISH, status)
+-                        activeWorkers.remove(worker)
++                        activeRealPingWorkers.remove(worker)
+                     }
+-                    activeWorkers.add(worker)
++                    activeRealPingWorkers.add(worker)
++                    worker.start()
++                }
++            }
++
++            MSG_MEASURE_CONFIG_SPEED -> {
++                val guidsList = if (message.serverGuids.isNotEmpty()) {
++                    message.serverGuids
++                } else if (message.subscriptionId.isNotEmpty()) {
++                    MmkvManager.decodeServerList(message.subscriptionId)
++                } else {
++                    MmkvManager.decodeAllServerList()
++                }
++
++                if (guidsList.isNotEmpty()) {
++                    lateinit var worker: SpeedTestWorkerService
++                    worker = SpeedTestWorkerService(this, guidsList) { status ->
++                        MessageUtil.sendMsg2UI(this@V2RayTestService, AppConfig.MSG_MEASURE_CONFIG_FINISH, status)
++                        activeSpeedTestWorkers.remove(worker)
++                    }
++                    activeSpeedTestWorkers.add(worker)
+                     worker.start()
+                 }
+             }
+
+             MSG_MEASURE_CONFIG_CANCEL -> {
+-                // cancel all running batch workers independently
+-                val snapshot = ArrayList(activeWorkers)
+-                snapshot.forEach { it.cancel() }
+-                activeWorkers.clear()
++                cancelAllWorkers()
+             }
+         }
+         return super.onStartCommand(intent, flags, startId)
+     }
+-}
+\ No newline at end of file
++
++    private fun cancelAllWorkers() {
++        val realPingSnapshot = ArrayList(activeRealPingWorkers)
++        realPingSnapshot.forEach { it.cancel() }
++        activeRealPingWorkers.clear()
++
++        val speedTestSnapshot = ArrayList(activeSpeedTestWorkers)
++        speedTestSnapshot.forEach { it.cancel() }
++        activeSpeedTestWorkers.clear()
++    }
++}
+diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/ui/MainActivity.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/ui/MainActivity.kt
+index 4327a5cf..2c0c6f24 100644
+--- a/V2rayNG/app/src/main/java/com/v2ray/ang/ui/MainActivity.kt
++++ b/V2rayNG/app/src/main/java/com/v2ray/ang/ui/MainActivity.kt
+@@ -309,6 +309,12 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
+             true
+         }
+
++        R.id.speed_test_all -> {
++            toast(getString(R.string.connection_test_testing_count, mainViewModel.serversCache.count()))
++            mainViewModel.testAllSpeed()
++            true
++        }
++
+         R.id.service_restart -> {
+             restartV2Ray()
+             true
+@@ -646,4 +652,4 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
+         tabMediator?.detach()
+         super.onDestroy()
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/ui/MainRecyclerAdapter.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/ui/MainRecyclerAdapter.kt
+index 806d6323..e1d8b2b5 100644
+--- a/V2rayNG/app/src/main/java/com/v2ray/ang/ui/MainRecyclerAdapter.kt
++++ b/V2rayNG/app/src/main/java/com/v2ray/ang/ui/MainRecyclerAdapter.kt
+@@ -68,6 +68,8 @@ class MainRecyclerAdapter(
+             } else {
+                 holder.itemMainBinding.tvTestResult.setTextColor(ContextCompat.getColor(context, R.color.colorPing))
+             }
++            holder.itemMainBinding.tvSpeedResult.text = aff?.getTestSpeedString().orEmpty()
++            holder.itemMainBinding.tvSpeedResult.setTextColor(ContextCompat.getColor(context, R.color.colorSpeedTest))
+
+             //layoutIndicator
+             if (guid == MmkvManager.getSelectServer()) {
+@@ -203,4 +205,4 @@ class MainRecyclerAdapter(
+
+     override fun onItemDismiss(position: Int) {
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/viewmodel/MainViewModel.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/viewmodel/MainViewModel.kt
+index 88b6b7cc..f00c90d7 100644
+--- a/V2rayNG/app/src/main/java/com/v2ray/ang/viewmodel/MainViewModel.kt
++++ b/V2rayNG/app/src/main/java/com/v2ray/ang/viewmodel/MainViewModel.kt
+@@ -230,6 +230,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
+         }
+     }
+
++    fun testAllSpeed() {
++        MessageUtil.sendMsg2TestService(
++            getApplication(),
++            TestServiceMessage(key = AppConfig.MSG_MEASURE_CONFIG_CANCEL)
++        )
++        val guids = serversCache.map { it.guid }.toList()
++        MmkvManager.clearAllTestDelayResults(guids)
++        MmkvManager.clearAllTestSpeedResults(guids)
++        updateListAction.value = -1
++
++        viewModelScope.launch(Dispatchers.Default) {
++            if (serversCache.isEmpty()) {
++                return@launch
++            }
++            MessageUtil.sendMsg2TestService(
++                getApplication(),
++                TestServiceMessage(
++                    key = AppConfig.MSG_MEASURE_CONFIG_SPEED,
++                    subscriptionId = subscriptionId,
++                    serverGuids = if (keywordFilter.isNotEmpty()) guids else emptyList()
++                )
++            )
++        }
++    }
++
+     /**
+      * Tests the real ping for the current server.
+      */
+@@ -475,6 +500,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
+                     updateListAction.value = getPosition(resultPair.first)
+                 }
+
++                AppConfig.MSG_MEASURE_CONFIG_SPEED_SUCCESS -> {
++                    val resultPair = intent.serializable<Pair<String, Double>>("content") ?: return
++                    MmkvManager.encodeServerTestSpeedMbps(resultPair.first, resultPair.second)
++                    updateListAction.value = getPosition(resultPair.first)
++                }
++
+                 AppConfig.MSG_MEASURE_CONFIG_NOTIFY -> {
+                     val content = intent.getStringExtra("content")
+                     updateTestResultAction.value =
+diff --git a/V2rayNG/app/src/main/res/layout/item_recycler_main.xml b/V2rayNG/app/src/main/res/layout/item_recycler_main.xml
+index b0760742..ba430a3b 100644
+--- a/V2rayNG/app/src/main/res/layout/item_recycler_main.xml
++++ b/V2rayNG/app/src/main/res/layout/item_recycler_main.xml
+@@ -214,6 +214,17 @@
+                     android:textSize="11sp"
+                     tools:text="214ms" />
+
++                <TextView
++                    android:id="@+id/tv_speed_result"
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:layout_marginStart="@dimen/padding_spacing_dp8"
++                    android:lines="1"
++                    android:textAppearance="@style/TextAppearance.AppCompat.Small"
++                    android:textColor="@color/colorSpeedTest"
++                    android:textSize="11sp"
++                    tools:text="24 Mbps" />
++
+             </LinearLayout>
+
+         </LinearLayout>
+diff --git a/V2rayNG/app/src/main/res/menu/menu_main.xml b/V2rayNG/app/src/main/res/menu/menu_main.xml
+index 77ea890d..8bbafd57 100644
+--- a/V2rayNG/app/src/main/res/menu/menu_main.xml
++++ b/V2rayNG/app/src/main/res/menu/menu_main.xml
+@@ -94,6 +94,10 @@
+         android:id="@+id/real_ping_all"
+         android:title="@string/title_real_ping_all_server"
+         app:showAsAction="never" />
++    <item
++        android:id="@+id/speed_test_all"
++        android:title="@string/title_speed_test_all_server"
++        app:showAsAction="never" />
+     <item
+         android:id="@+id/sort_by_test_results"
+         android:title="@string/title_sort_by_test_results"
+@@ -106,4 +110,4 @@
+         android:id="@+id/sub_update"
+         android:title="@string/title_sub_update"
+         app:showAsAction="never" />
+-</menu>
+\ No newline at end of file
++</menu>
+diff --git a/V2rayNG/app/src/main/res/values-ru/strings.xml b/V2rayNG/app/src/main/res/values-ru/strings.xml
+index 7a390b05..7a2fe559 100644
+--- a/V2rayNG/app/src/main/res/values-ru/strings.xml
++++ b/V2rayNG/app/src/main/res/values-ru/strings.xml
+@@ -205,6 +205,10 @@
+
+     <string name="title_pref_delay_test_url">Сервис проверки задержки</string>
+     <string name="summary_pref_delay_test_url">URL</string>
++    <string name="title_pref_speed_test_url">Сервис проверки скорости</string>
++    <string name="summary_pref_speed_test_url">Один или несколько URL через запятую</string>
++    <string name="title_pref_speed_test_timeout">Таймаут проверки скорости, секунды</string>
++    <string name="title_pref_speed_test_concurrency">Параллельность проверки скорости (1-8)</string>
+
+     <string name="title_pref_ip_api_url">Сервис проверки текущего соединения</string>
+     <string name="summary_pref_ip_api_url">URL</string>
+@@ -287,6 +291,7 @@
+     <string name="title_sub_update">Обновить подписку</string>
+     <string name="title_ping_all_server">Проверить профили</string>
+     <string name="title_real_ping_all_server">Проверить задержку профилей</string>
++    <string name="title_speed_test_all_server">Проверить скорость</string>
+     <string name="title_user_asset_setting">Файлы ресурсов</string>
+     <string name="title_sort_by_test_results">Сортировать по результатам теста</string>
+     <string name="title_filter_config">Фильтр профилей</string>
+diff --git a/V2rayNG/app/src/main/res/values/colors.xml b/V2rayNG/app/src/main/res/values/colors.xml
+index 4054d13e..ee92d5ad 100644
+--- a/V2rayNG/app/src/main/res/values/colors.xml
++++ b/V2rayNG/app/src/main/res/values/colors.xml
+@@ -2,6 +2,7 @@
+ <resources>
+     <color name="colorPing">#009966</color>
+     <color name="colorPingRed">#FF0099</color>
++    <color name="colorSpeedTest">#1976D2</color>
+     <color name="colorConfigType">#f97910</color>
+     <color name="colorWhite">#FFFFFF</color>
+     <color name="color_fab_active">#f97910</color>
+diff --git a/V2rayNG/app/src/main/res/values/strings.xml b/V2rayNG/app/src/main/res/values/strings.xml
+index ac5507ab..d9d7b70c 100644
+--- a/V2rayNG/app/src/main/res/values/strings.xml
++++ b/V2rayNG/app/src/main/res/values/strings.xml
+@@ -209,6 +209,10 @@
+
+     <string name="title_pref_delay_test_url">True delay test url </string>
+     <string name="summary_pref_delay_test_url">Url</string>
++    <string name="title_pref_speed_test_url">Speed test url</string>
++    <string name="summary_pref_speed_test_url">One or more URLs separated by comma</string>
++    <string name="title_pref_speed_test_timeout">Speed test timeout, seconds</string>
++    <string name="title_pref_speed_test_concurrency">Speed test concurrency (1-8)</string>
+
+     <string name="title_pref_ip_api_url">Current connection info test url</string>
+     <string name="summary_pref_ip_api_url">Url</string>
+@@ -293,6 +297,7 @@
+     <string name="title_sub_update">Update subscription</string>
+     <string name="title_ping_all_server">Tcping config</string>
+     <string name="title_real_ping_all_server">Real delay config</string>
++    <string name="title_speed_test_all_server">Speed test</string>
+     <string name="title_user_asset_setting">Asset files</string>
+     <string name="title_sort_by_test_results">Sorting by test results</string>
+     <string name="title_filter_config">Filter config</string>
+diff --git a/V2rayNG/app/src/main/res/xml/pref_settings.xml b/V2rayNG/app/src/main/res/xml/pref_settings.xml
+index d82374a6..f79ae7da 100644
+--- a/V2rayNG/app/src/main/res/xml/pref_settings.xml
++++ b/V2rayNG/app/src/main/res/xml/pref_settings.xml
+@@ -283,6 +283,23 @@
+             android:summary="@string/summary_pref_delay_test_url"
+             android:title="@string/title_pref_delay_test_url" />
+
++        <EditTextPreference
++            android:key="pref_speed_test_url"
++            android:summary="@string/summary_pref_speed_test_url"
++            android:title="@string/title_pref_speed_test_url" />
++
++        <EditTextPreference
++            android:inputType="number"
++            android:key="pref_speed_test_timeout"
++            android:summary="15"
++            android:title="@string/title_pref_speed_test_timeout" />
++
++        <EditTextPreference
++            android:inputType="number"
++            android:key="pref_speed_test_concurrency"
++            android:summary="4"
++            android:title="@string/title_pref_speed_test_concurrency" />
++
+         <EditTextPreference
+             android:key="pref_ip_api_url"
+             android:summary="@string/summary_pref_ip_api_url"
+@@ -298,4 +315,4 @@
+
+     </PreferenceCategory>
+
+-</PreferenceScreen>
+\ No newline at end of file
++</PreferenceScreen>
