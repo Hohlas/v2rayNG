@@ -3,8 +3,17 @@
 ## Добавление подписки
 Копируем ссылку + 'Импорт из буфера обмена'
 
+Mobile
 ```text
 https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile.txt
+```
+Mobile-2
+```text
+https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile-2.txt
+```
+CIDR
+```text
+https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/WHITE-CIDR-RU-all.txt
 ```
 
 <img width="627" height="1280" alt="Добавление подписки" src="https://github.com/user-attachments/assets/60e83a4e-96dc-4607-a360-2a1d93772b6b" />
