@@ -98,36 +98,46 @@ object V2rayConfigManager {
             return result
         }
 
-        // check if tun inbound exists
-        val json = JsonUtil.parseString(raw) ?: return result
-        val inboundsJson = if (json.has("inbounds") && json.get("inbounds")?.isJsonNull == false) {
-            json.getAsJsonArray("inbounds")
-        } else {
-            JsonArray()
-        }
+        val json = JsonUtil.parseString(raw)?.takeIf { it.isJsonObject }?.asJsonObject ?: return result
 
-        for (i in 0 until inboundsJson.size()) {
-            val elem = inboundsJson.get(i)
-            if (elem.isJsonObject) {
-                val inb = elem.asJsonObject
-                val tag = if (inb.has("tag") && inb.get("tag")?.isJsonNull == false) inb.get("tag").asString else ""
-                if (tag == "tun") return result
+        // Check whether package names need to be replaced with UIDs
+        if (SettingsManager.canUseProcessRouting()) {
+            val rulesJson = json.get("routing")?.takeIf { it.isJsonObject }?.asJsonObject
+                ?.get("rules")?.takeIf { it.isJsonArray }?.asJsonArray
+                ?: JsonArray()
+
+            for (elem in rulesJson) {
+                val rule = elem.takeIf { it.isJsonObject }?.asJsonObject ?: continue
+                val process = rule.get("process")?.takeIf { it.isJsonArray }?.asJsonArray ?: continue
+                val packages = process.mapNotNull {
+                    it.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString
+                }.takeIf { it.isNotEmpty() } ?: continue
+                val uids = PackageUidResolver.packageNamesToUids(context, packages).takeIf { it.isNotEmpty() } ?: continue
+
+                rule.add("process", JsonArray().apply { uids.forEach { add(it) } })
             }
         }
 
-        // add tun inbound from template
-        val templateConfig = initV2rayConfig(context) ?: return result
-        val inboundTun = templateConfig.inbounds.firstOrNull { it.tag == "tun" } ?: return result
-        inboundTun.settings?.mtu = SettingsManager.getVpnMtu()
-
-        // add to json
-        inboundsJson.add(JsonUtil.parseString(JsonUtil.toJson(inboundTun)))
-        if (inboundsJson.size() == 1) {
-            json.add("inbounds", inboundsJson)
+        // check if tun inbound exists
+        val inboundsJson = json.get("inbounds")?.takeIf { it.isJsonArray }?.asJsonArray
+            ?: JsonArray().also { json.add("inbounds", it) }
+        val tunNotExists = inboundsJson.none { elem ->
+            elem.isJsonObject && elem.asJsonObject.get("protocol")
+                ?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }
+                ?.asString == "tun"
         }
 
-        val updatedRaw = JsonUtil.toJsonPretty(json) ?: return result
-        return ConfigResult(true, guid, updatedRaw)
+        if (tunNotExists) {
+            // add tun inbound from template
+            initV2rayConfig(context)?.let { templateConfig ->
+                templateConfig.inbounds.firstOrNull { it.tag == "tun" }?.let { inboundTun ->
+                    inboundTun.settings?.mtu = SettingsManager.getVpnMtu()
+                    inboundsJson.add(JsonUtil.parseString(JsonUtil.toJson(inboundTun)))
+                }
+            }
+        }
+
+        return JsonUtil.toJsonPretty(json)?.let { ConfigResult(true, guid, it) } ?: result
     }
 
     /**
@@ -374,6 +384,12 @@ object V2rayConfigManager {
      */
     private fun getInbounds(v2rayConfig: V2rayConfig): Boolean {
         try {
+            val vpn = SettingsManager.isVpnMode()
+            val useHev = SettingsManager.isUsingHevTun()
+            val forcedByHev = vpn && useHev
+
+            val enableLocalProxy = forcedByHev || MmkvManager.decodeSettingsBool(AppConfig.PREF_ENABLE_LOCAL_PROXY, true)
+
             val socksPort = SettingsManager.getSocksPort()
             val socksUsername = SettingsManager.getSocksUsername()
             val socksPassword = SettingsManager.getSocksPassword()
@@ -386,6 +402,7 @@ object V2rayConfigManager {
                 inbound1.listen = AppConfig.LOOPBACK
             }
             inbound1.port = socksPort
+            inbound1.settings?.udp = MmkvManager.decodeSettingsBool(AppConfig.PREF_SOCKS_ENABLE_UDP, true)
             if (socksUsername != null && socksPassword != null) {
                 inbound1.settings?.auth = "password"
                 inbound1.settings?.accounts = listOf(
@@ -416,7 +433,13 @@ object V2rayConfigManager {
                 inbound2.tag = EConfigType.HTTP.name.lowercase()
                 inbound2.port = SettingsManager.getHttpPort()
                 inbound2.protocol = EConfigType.HTTP.name.lowercase()
+                inbound2.settings?.auth = null
+                inbound2.settings?.udp = null
                 v2rayConfig.inbounds.add(inbound2)
+            }
+
+            if (!enableLocalProxy) {
+                v2rayConfig.inbounds.removeIf { it.protocol == "socks" || it.protocol == "http" }
             }
 
             if (needTun()) {
@@ -1293,7 +1316,10 @@ object V2rayConfigManager {
             }
 
             NetworkType.KCP.type -> {
-                streamSettings.kcpSettings = StreamSettingsBean.KcpSettingsBean()
+                val kcpSetting = StreamSettingsBean.KcpSettingsBean()
+                profileItem.kcpMtu?.let { kcpSetting.mtu = it }
+                profileItem.kcpTti?.let { kcpSetting.tti = it }
+                streamSettings.kcpSettings = kcpSetting
                 val udpMaskList = mutableListOf<StreamSettingsBean.FinalMaskBean.MaskBean>()
                 if (!headerType.isNullOrEmpty() && headerType != "none") {
                     val kcpHeaderType = when {
