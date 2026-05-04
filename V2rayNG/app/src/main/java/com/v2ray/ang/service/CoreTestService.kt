@@ -20,6 +20,7 @@ class CoreTestService : Service() {
 
     // manage active batch workers so each batch is independent and cancellable
     private val activeWorkers = Collections.synchronizedList(mutableListOf<RealPingWorkerService>())
+    private val activeSpeedWorkers = Collections.synchronizedList(mutableListOf<SpeedTestWorkerService>())
 
     /**
      * Initializes the V2Ray environment.
@@ -47,6 +48,9 @@ class CoreTestService : Service() {
         val snapshot = ArrayList(activeWorkers)
         snapshot.forEach { it.cancel() }
         activeWorkers.clear()
+        val speedSnapshot = ArrayList(activeSpeedWorkers)
+        speedSnapshot.forEach { it.cancel() }
+        activeSpeedWorkers.clear()
         NotificationHelper.stopForeground(this)
         super.onDestroy()
     }
@@ -67,6 +71,7 @@ class CoreTestService : Service() {
 
         when (message.key) {
             AppConfig.MSG_MEASURE_CONFIG_START -> handleMeasureStart(message, startId)
+            AppConfig.MSG_MEASURE_CONFIG_SPEED -> handleSpeedTestStart(message, startId)
             AppConfig.MSG_MEASURE_CONFIG_CANCEL -> handleMeasureCancel()
             else -> {
                 NotificationHelper.stopForeground(this); stopSelf(startId)
@@ -125,11 +130,65 @@ class CoreTestService : Service() {
             is RealPingEvent.Finish -> {
                 MessageUtil.sendMsg2UI(this, AppConfig.MSG_MEASURE_CONFIG_FINISH, event.status)
                 onWorkerDone()
-                if (activeWorkers.isEmpty()) {
+                if (activeWorkers.isEmpty() && activeSpeedWorkers.isEmpty()) {
                     NotificationHelper.stopForeground(this)
                     stopSelf()
                 }
             }
+        }
+    }
+
+    private fun handleSpeedTestStart(message: TestServiceMessage, startId: Int) {
+        LogUtil.i(AppConfig.TAG, "CoreTestService starting speed worker subscription ${message.subscriptionId}")
+
+        NotificationHelper.startForeground(
+            this,
+            NotificationChannelType.CORE_TEST,
+            getString(R.string.app_name),
+            getString(R.string.title_speed_test_all_server)
+        )
+
+        val guidsList = when {
+            message.serverGuids.isNotEmpty() -> message.serverGuids
+            message.subscriptionId.isNotEmpty() -> MmkvManager.decodeServerList(message.subscriptionId)
+            else -> MmkvManager.decodeAllServerList()
+        }
+
+        if (guidsList.isNotEmpty()) {
+            lateinit var worker: SpeedTestWorkerService
+            worker = SpeedTestWorkerService(
+                context = this,
+                guids = guidsList,
+                onDelayResult = { guid, delay ->
+                    MmkvManager.encodeServerTestDelayMillis(guid, delay)
+                    MessageUtil.sendMsg2UI(this, AppConfig.MSG_MEASURE_CONFIG_SUCCESS, guid)
+                },
+                onSpeedResult = { guid, speed ->
+                    MmkvManager.encodeServerTestSpeedMbps(guid, speed)
+                    MessageUtil.sendMsg2UI(this, AppConfig.MSG_MEASURE_CONFIG_SPEED_SUCCESS, guid)
+                },
+                onProgress = { text ->
+                    NotificationHelper.updateNotification(
+                        channelType = NotificationChannelType.CORE_TEST,
+                        context = this,
+                        content = getString(R.string.connection_runing_task_left, text)
+                    )
+                    MessageUtil.sendMsg2UI(this, AppConfig.MSG_MEASURE_CONFIG_NOTIFY, text)
+                },
+                onFinish = { status ->
+                    MessageUtil.sendMsg2UI(this, AppConfig.MSG_MEASURE_CONFIG_FINISH, status)
+                    activeSpeedWorkers.remove(worker)
+                    if (activeWorkers.isEmpty() && activeSpeedWorkers.isEmpty()) {
+                        NotificationHelper.stopForeground(this)
+                        stopSelf()
+                    }
+                }
+            )
+            activeSpeedWorkers.add(worker)
+            worker.start()
+        } else {
+            NotificationHelper.stopForeground(this)
+            stopSelf(startId)
         }
     }
 
@@ -138,6 +197,9 @@ class CoreTestService : Service() {
         val snapshot = ArrayList(activeWorkers)
         snapshot.forEach { it.cancel() }
         activeWorkers.clear()
+        val speedSnapshot = ArrayList(activeSpeedWorkers)
+        speedSnapshot.forEach { it.cancel() }
+        activeSpeedWorkers.clear()
         NotificationHelper.stopForeground(this)
         stopSelf()
     }
