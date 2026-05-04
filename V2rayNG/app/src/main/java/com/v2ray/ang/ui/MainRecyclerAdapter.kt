@@ -63,6 +63,7 @@ class MainRecyclerAdapter(
             //TestResult
             val aff = MmkvManager.decodeServerAffiliationInfo(guid)
             holder.itemMainBinding.tvTestResult.text = aff?.getTestDelayString().orEmpty()
+            holder.itemMainBinding.tvSpeedTestResult.text = aff?.getTestSpeedString().orEmpty()
             if ((aff?.testDelayMillis ?: 0L) < 0L) {
                 holder.itemMainBinding.tvTestResult.setTextColor(ContextCompat.getColor(context, R.color.colorPingRed))
             } else {

@@ -230,6 +230,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun testAllDownloadSpeed() {
+        MessageUtil.sendMsg2TestService(
+            getApplication(),
+            TestServiceMessage(key = AppConfig.MSG_MEASURE_CONFIG_CANCEL)
+        )
+        val keys = serversCache.map { it.guid }.toList()
+        MmkvManager.clearAllTestDelayResults(keys)
+        MmkvManager.clearAllTestSpeedResults(keys)
+        updateListAction.value = -1
+
+        viewModelScope.launch(Dispatchers.Default) {
+            if (serversCache.isEmpty()) {
+                return@launch
+            }
+            MessageUtil.sendMsg2TestService(
+                getApplication(),
+                TestServiceMessage(
+                    key = AppConfig.MSG_MEASURE_CONFIG_SPEED,
+                    subscriptionId = subscriptionId,
+                    serverGuids = if (keywordFilter.isNotEmpty()) serversCache.map { it.guid } else emptyList()
+                )
+            )
+        }
+    }
+
     /**
      * Tests the real ping for the current server.
      */
@@ -472,6 +497,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 AppConfig.MSG_MEASURE_CONFIG_SUCCESS -> {
                     val content = intent.getStringExtra("content")
                     updateListAction.value = getPosition(content?: "")
+                }
+
+                AppConfig.MSG_MEASURE_CONFIG_SPEED_SUCCESS -> {
+                    val content = intent.getStringExtra("content")
+                    updateListAction.value = getPosition(content ?: "")
                 }
 
                 AppConfig.MSG_MEASURE_CONFIG_NOTIFY -> {
