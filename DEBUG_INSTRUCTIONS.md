@@ -163,6 +163,33 @@ libv2ray.aar
 libhev-socks5-tunnel.aar
 ```
 
+Important: do not keep unpacked native libraries under:
+
+```text
+V2rayNG/app/src/main/jniLibs/
+```
+
+This path is ignored by git, but Gradle still packages files from it. During the
+2.1.5 port an old local `app/src/main/jniLibs/arm64-v8a/libgojni.so` overrode
+the correct `libgojni.so` from `app/libs/libv2ray.aar`. The APK built
+successfully, but VPN startup crashed with:
+
+```text
+java.lang.UnsatisfiedLinkError: No implementation found for
+void libv2ray.CoreController.registerProcessFinder(libv2ray.ProcessFinder)
+```
+
+Fix:
+
+```bash
+rm -rf V2rayNG/app/src/main/jniLibs
+cd V2rayNG
+./gradlew clean assembleRelease
+```
+
+After the clean rebuild, the warning about duplicate `lib/arm64-v8a/libgojni.so`
+must disappear.
+
 The original build-fix branch/commit supplied the missing local build setup:
 
 ```text
