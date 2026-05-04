@@ -42,6 +42,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val isRunning by lazy { MutableLiveData<Boolean>() }
     val updateListAction by lazy { MutableLiveData<Int>() }
     val updateTestResultAction by lazy { MutableLiveData<String>() }
+    private val tcpingTestScope by lazy { CoroutineScope(Dispatchers.IO) }
+    private var isDownloadSpeedTestRunning = false
 
     /**
      * Refer to the official documentation for [registerReceiver](https://developer.android.com/reference/androidx/core/content/ContextCompat#registerReceiver(android.content.Context,android.content.BroadcastReceiver,android.content.IntentFilter,int):
@@ -175,6 +177,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * Tests the real ping for all servers.
      */
     fun testAllRealPing() {
+        isDownloadSpeedTestRunning = false
         MessageUtil.sendMsg2TestService(
             getApplication(),
             TestServiceMessage(key = AppConfig.MSG_MEASURE_CONFIG_CANCEL)
@@ -198,6 +201,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun testAllDownloadSpeed() {
+        isDownloadSpeedTestRunning = true
         MessageUtil.sendMsg2TestService(
             getApplication(),
             TestServiceMessage(key = AppConfig.MSG_MEASURE_CONFIG_CANCEL)
@@ -394,6 +398,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         MmkvManager.encodeServerList(sortedServerList, subId)
     }
 
+    fun sortBySpeedTestResults() {
+        if (subscriptionId.isEmpty()) {
+            MmkvManager.decodeSubsList().forEach { guid ->
+                sortBySpeedTestResultsForSub(guid)
+            }
+        } else {
+            sortBySpeedTestResultsForSub(subscriptionId)
+        }
+    }
+
+    private fun sortBySpeedTestResultsForSub(subId: String) {
+        data class ServerSpeed(val guid: String, val speedMbps: Double, val originalIndex: Int)
+
+        val serverSpeeds = MmkvManager.decodeServerList(subId).mapIndexed { index, key ->
+            val speed = MmkvManager.decodeServerAffiliationInfo(key)?.testSpeedMbps ?: 0.0
+            ServerSpeed(key, speed, index)
+        }
+        val sortedServerList = serverSpeeds.sortedWith(
+            compareByDescending<ServerSpeed> { if (it.speedMbps > 0.0) 1 else 0 }
+                .thenByDescending { it.speedMbps }
+                .thenBy { it.originalIndex }
+        ).map { it.guid }.toMutableList()
+
+        MmkvManager.encodeServerList(sortedServerList, subId)
+    }
+
+    private fun sortVisibleBySpeedTestResults() {
+        val indexedServers = serversCache.mapIndexed { index, server ->
+            val speed = MmkvManager.decodeServerAffiliationInfo(server.guid)?.testSpeedMbps ?: 0.0
+            Triple(server, speed, index)
+        }
+        serversCache.clear()
+        serversCache.addAll(
+            indexedServers.sortedWith(
+                compareByDescending<Triple<ServersCache, Double, Int>> { if (it.second > 0.0) 1 else 0 }
+                    .thenByDescending { it.second }
+                    .thenBy { it.third }
+            ).map { it.first }
+        )
+    }
+
 
     /**
      * Initializes assets.
@@ -434,8 +479,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 removeInvalidServer()
             }
 
+            val sortBySpeed = isDownloadSpeedTestRunning
+            isDownloadSpeedTestRunning = false
+
             if (MmkvManager.decodeSettingsBool(AppConfig.PREF_AUTO_SORT_AFTER_TEST)) {
-                sortByTestResults()
+                if (sortBySpeed) {
+                    sortBySpeedTestResults()
+                } else {
+                    sortByTestResults()
+                }
             }
 
             withContext(Dispatchers.Main) {
@@ -485,7 +537,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 AppConfig.MSG_MEASURE_CONFIG_SPEED_SUCCESS -> {
                     val content = intent.getStringExtra("content")
-                    updateListAction.value = getPosition(content ?: "")
+                    if (MmkvManager.decodeSettingsBool(AppConfig.PREF_AUTO_SORT_AFTER_TEST)) {
+                        sortVisibleBySpeedTestResults()
+                        updateListAction.value = -1
+                    } else {
+                        updateListAction.value = getPosition(content ?: "")
+                    }
                 }
 
                 AppConfig.MSG_MEASURE_CONFIG_NOTIFY -> {
