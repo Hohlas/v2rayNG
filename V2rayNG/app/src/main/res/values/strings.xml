@@ -381,6 +381,13 @@
     <string name="connection_not_connected">Not connected</string>
     <string name="connection_runing_task_left">Number of running test tasks: %s</string>
 
+    <string name="auto_action_description">Auto: update subscriptions, test speed, sort and connect the fastest server</string>
+    <string name="auto_action_updating_subscription">Updating subscriptions…</string>
+    <string name="auto_action_speed_testing">Testing speed…</string>
+    <string name="auto_action_sorting">Sorting by speed…</string>
+    <string name="auto_action_connecting">Connecting to the fastest server…</string>
+    <string name="auto_action_no_server">No servers available</string>
+
     <string name="import_subscription_success">Subscription imported Successfully</string>
     <string name="import_subscription_failure">Import subscription failed</string>
     <string name="title_fragment_settings">Fragment Settings</string>

@@ -425,6 +425,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         MmkvManager.encodeServerList(sortedServerList, subId)
     }
 
+    /**
+     * Returns the fastest server GUID based on the stored speed test results
+     * for the current subscription scope (or all subscriptions if none is selected).
+     * Servers with a positive speed are preferred, then higher speed wins,
+     * keeping the original list order as a tiebreaker.
+     *
+     * @return The fastest server GUID, or null if there are no servers.
+     */
+    fun getFastestServerGuid(): String? {
+        val keys = if (subscriptionId.isEmpty()) {
+            MmkvManager.decodeAllServerList()
+        } else {
+            MmkvManager.decodeServerList(subscriptionId)
+        }
+        if (keys.isEmpty()) {
+            return null
+        }
+
+        val ranked = keys.mapIndexed { index, guid ->
+            val speed = MmkvManager.decodeServerAffiliationInfo(guid)?.testSpeedMbps ?: 0.0
+            Triple(guid, speed, index)
+        }
+        return ranked.maxWith(
+            compareBy<Triple<String, Double, Int>> { if (it.second > 0.0) 1 else 0 }
+                .thenByDescending { it.second }
+                .thenBy { it.third }
+        ).first
+    }
+
     private fun sortVisibleBySpeedTestResults() {
         val indexedServers = serversCache.mapIndexed { index, server ->
             val speed = MmkvManager.decodeServerAffiliationInfo(server.guid)?.testSpeedMbps ?: 0.0
