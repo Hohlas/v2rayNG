@@ -21,7 +21,7 @@ import com.v2ray.ang.extension.toastError
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.NotificationManager
 import com.v2ray.ang.handler.SettingsManager
-import com.v2ray.ang.handler.SpeedtestManager
+
 import com.v2ray.ang.root.RootManager
 import com.v2ray.ang.service.CoreProxyOnlyService
 import com.v2ray.ang.service.CoreRootService
@@ -401,13 +401,6 @@ object CoreServiceManager {
                 "<font color=\"${colorHex(service, R.color.md_theme_error)}\">$errorText</font>"
             }
             MessageUtil.sendMsg2UI(service, AppConfig.MSG_MEASURE_DELAY_SUCCESS, result)
-
-            // Only fetch IP info if the delay test was successful
-            if (time >= 0) {
-                SpeedtestManager.getRemoteIPInfo()?.let { ip ->
-                    MessageUtil.sendMsg2UI(service, AppConfig.MSG_MEASURE_DELAY_SUCCESS, "$result\n$ip")
-                }
-            }
         }
     }
 

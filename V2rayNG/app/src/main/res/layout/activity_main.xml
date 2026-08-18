@@ -83,7 +83,7 @@
                             android:gravity="start|center"
                             android:maxLines="3"
                             android:minLines="1"
-                            android:paddingStart="@dimen/padding_spacing_dp16"
+                            android:paddingStart="@dimen/padding_spacing_dp88"
                             android:text="@string/connection_test_pending"
                             android:textAppearance="@style/TextAppearance.AppCompat.Small" />
 

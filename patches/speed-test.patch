@@ -68,10 +68,17 @@ index 714c0956..e879e81c 100644
      /** Notification channel IDs and names. */
      const val RAY_NG_CHANNEL_ID = "RAY_NG_M_CH_ID"
 diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/core/CoreServiceManager.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/core/CoreServiceManager.kt
-index 2076ed02..353db2bf 100644
+index 2076ed02..e9704946 100644
 --- a/V2rayNG/app/src/main/java/com/v2ray/ang/core/CoreServiceManager.kt
 +++ b/V2rayNG/app/src/main/java/com/v2ray/ang/core/CoreServiceManager.kt
-@@ -27,6 +27,7 @@ import com.v2ray.ang.service.CoreProxyOnlyService
+@@ -21,12 +21,13 @@ import com.v2ray.ang.extension.toastError
+ import com.v2ray.ang.handler.MmkvManager
+ import com.v2ray.ang.handler.NotificationManager
+ import com.v2ray.ang.handler.SettingsManager
+-import com.v2ray.ang.handler.SpeedtestManager
++
+ import com.v2ray.ang.root.RootManager
+ import com.v2ray.ang.service.CoreProxyOnlyService
  import com.v2ray.ang.service.CoreRootService
  import com.v2ray.ang.service.CoreVpnService
  import com.v2ray.ang.service.DialerNativeService
@@ -79,7 +86,7 @@ index 2076ed02..353db2bf 100644
  import com.v2ray.ang.service.DialerWebviewService
  import com.v2ray.ang.service.IDialerService
  import com.v2ray.ang.util.LogUtil
-@@ -386,9 +387,18 @@ object CoreServiceManager {
+@@ -386,21 +387,45 @@ object CoreServiceManager {
              }
  
              val result = if (time >= 0) {
@@ -99,11 +106,15 @@ index 2076ed02..353db2bf 100644
 +                "<font color=\"${colorHex(service, R.color.md_theme_error)}\">$errorText</font>"
              }
              MessageUtil.sendMsg2UI(service, AppConfig.MSG_MEASURE_DELAY_SUCCESS, result)
++        }
++    }
  
-@@ -401,6 +411,28 @@ object CoreServiceManager {
-         }
-     }
- 
+-            // Only fetch IP info if the delay test was successful
+-            if (time >= 0) {
+-                SpeedtestManager.getRemoteIPInfo()?.let { ip ->
+-                    MessageUtil.sendMsg2UI(service, AppConfig.MSG_MEASURE_DELAY_SUCCESS, "$result\n$ip")
+-                }
+-            }
 +    /**
 +     * Measures the download speed of the currently selected server.
 +     * @param service The running service.
@@ -119,9 +130,9 @@ index 2076ed02..353db2bf 100644
 +            String.format("%.0f Mbps", speed)
 +        } else {
 +            String.format("%.1f Mbps", speed)
-+        }
-+    }
-+
+         }
+     }
+ 
 +    private fun colorHex(context: Context, resId: Int): String {
 +        return String.format("#%06X", 0xFFFFFF and ContextCompat.getColor(context, resId))
 +    }
@@ -413,10 +424,10 @@ index b3d8382b..74076bcb 100644
 +}
 diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/service/SpeedTestWorkerService.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/service/SpeedTestWorkerService.kt
 new file mode 100644
-index 00000000..cb50a683
+index 00000000..df17ed20
 --- /dev/null
 +++ b/V2rayNG/app/src/main/java/com/v2ray/ang/service/SpeedTestWorkerService.kt
-@@ -0,0 +1,256 @@
+@@ -0,0 +1,264 @@
 +package com.v2ray.ang.service
 +
 +import android.content.Context
@@ -569,15 +580,23 @@ index 00000000..cb50a683
 +            val controller = CoreNativeManager.newCoreController(SpeedTestCoreCallback())
 +            return try {
 +                controller.startLoop(config, 0)
-+                delay(600)
++                var started = 0
++                while (!controller.isRunning && started < 20) {
++                    delay(100)
++                    started++
++                }
 +                if (!controller.isRunning) {
 +                    LogUtil.w(AppConfig.TAG, "Speed test core did not start for $guid")
 +                    return 0.0
 +                }
-+                for (url in SettingsManager.getSpeedTestUrls()) {
-+                    val speed = downloadViaProxy(port, url)
-+                    if (speed > 0.0) {
-+                        return speed
++                // Retry the download phase once so a transient network hiccup
++                // does not report a working server as having no speed.
++                repeat(2) {
++                    for (url in SettingsManager.getSpeedTestUrls()) {
++                        val speed = downloadViaProxy(port, url)
++                        if (speed > 0.0) {
++                            return speed
++                        }
 +                    }
 +                }
 +                0.0
@@ -1163,18 +1182,21 @@ index 00000000..0a46065f
 +</vector>
 \ No newline at end of file
 diff --git a/V2rayNG/app/src/main/res/layout/activity_main.xml b/V2rayNG/app/src/main/res/layout/activity_main.xml
-index 0c08851f..86503c59 100644
+index 0c08851f..d672b832 100644
 --- a/V2rayNG/app/src/main/res/layout/activity_main.xml
 +++ b/V2rayNG/app/src/main/res/layout/activity_main.xml
-@@ -81,7 +81,7 @@
+@@ -81,9 +81,9 @@
                              android:layout_width="wrap_content"
                              android:layout_height="match_parent"
                              android:gravity="start|center"
 -                            android:maxLines="2"
 +                            android:maxLines="3"
                              android:minLines="1"
-                             android:paddingStart="@dimen/padding_spacing_dp16"
+-                            android:paddingStart="@dimen/padding_spacing_dp16"
++                            android:paddingStart="@dimen/padding_spacing_dp88"
                              android:text="@string/connection_test_pending"
+                             android:textAppearance="@style/TextAppearance.AppCompat.Small" />
+ 
 @@ -93,15 +93,15 @@
                  <FrameLayout
                      android:layout_width="wrap_content"
@@ -1318,6 +1340,18 @@ index 4054d13e..ee92d5ad 100644
      <color name="colorConfigType">#f97910</color>
      <color name="colorWhite">#FFFFFF</color>
      <color name="color_fab_active">#f97910</color>
+diff --git a/V2rayNG/app/src/main/res/values/dimens.xml b/V2rayNG/app/src/main/res/values/dimens.xml
+index 945ba3fe..98175557 100644
+--- a/V2rayNG/app/src/main/res/values/dimens.xml
++++ b/V2rayNG/app/src/main/res/values/dimens.xml
+@@ -3,6 +3,7 @@
+     <dimen name="padding_spacing_dp4">4dp</dimen>
+     <dimen name="padding_spacing_dp8">8dp</dimen>
+     <dimen name="padding_spacing_dp16">16dp</dimen>
++    <dimen name="padding_spacing_dp88">88dp</dimen>
+     <dimen name="image_size_dp24">24dp</dimen>
+     <dimen name="view_height_dp36">36dp</dimen>
+     <dimen name="view_height_dp48">48dp</dimen>
 diff --git a/V2rayNG/app/src/main/res/values/strings.xml b/V2rayNG/app/src/main/res/values/strings.xml
 index 419e5b6a..7be10833 100644
 --- a/V2rayNG/app/src/main/res/values/strings.xml

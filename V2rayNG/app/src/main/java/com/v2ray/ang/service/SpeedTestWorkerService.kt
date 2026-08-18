@@ -150,15 +150,23 @@ class SpeedTestWorkerService(
             val controller = CoreNativeManager.newCoreController(SpeedTestCoreCallback())
             return try {
                 controller.startLoop(config, 0)
-                delay(600)
+                var started = 0
+                while (!controller.isRunning && started < 20) {
+                    delay(100)
+                    started++
+                }
                 if (!controller.isRunning) {
                     LogUtil.w(AppConfig.TAG, "Speed test core did not start for $guid")
                     return 0.0
                 }
-                for (url in SettingsManager.getSpeedTestUrls()) {
-                    val speed = downloadViaProxy(port, url)
-                    if (speed > 0.0) {
-                        return speed
+                // Retry the download phase once so a transient network hiccup
+                // does not report a working server as having no speed.
+                repeat(2) {
+                    for (url in SettingsManager.getSpeedTestUrls()) {
+                        val speed = downloadViaProxy(port, url)
+                        if (speed > 0.0) {
+                            return speed
+                        }
                     }
                 }
                 0.0
