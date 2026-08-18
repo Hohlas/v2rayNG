@@ -824,10 +824,18 @@ index 4b340979..e6404014 100644
                          ContextCompat.startForegroundService(ctx, intent)
                      } else {
 diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/viewmodel/MainViewModel.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/viewmodel/MainViewModel.kt
-index 0eff1f0f..897bbec4 100644
+index 0eff1f0f..333f915a 100644
 --- a/V2rayNG/app/src/main/java/com/v2ray/ang/viewmodel/MainViewModel.kt
 +++ b/V2rayNG/app/src/main/java/com/v2ray/ang/viewmodel/MainViewModel.kt
-@@ -25,14 +25,19 @@ import com.v2ray.ang.extension.toastSuccess
+@@ -13,6 +13,7 @@ import androidx.lifecycle.viewModelScope
+ import com.v2ray.ang.AngApplication
+ import com.v2ray.ang.AppConfig
+ import com.v2ray.ang.R
++import com.v2ray.ang.core.CoreNativeManager
+ import com.v2ray.ang.dto.GroupMapItem
+ import com.v2ray.ang.dto.SubscriptionUpdateResult
+ import com.v2ray.ang.dto.TestServiceMessage
+@@ -25,14 +26,19 @@ import com.v2ray.ang.extension.toastSuccess
  import com.v2ray.ang.handler.AngConfigManager
  import com.v2ray.ang.handler.MmkvManager
  import com.v2ray.ang.handler.SettingsManager
@@ -847,7 +855,7 @@ index 0eff1f0f..897bbec4 100644
  
  class MainViewModel(application: Application) : AndroidViewModel(application) {
      private var serverList = mutableListOf<String>() // MmkvManager.decodeServerList()
-@@ -43,6 +48,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
+@@ -43,6 +49,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      val updateListAction by lazy { MutableLiveData<Int>() }
      val updateTestResultAction by lazy { MutableLiveData<String>() }
  
@@ -871,7 +879,7 @@ index 0eff1f0f..897bbec4 100644
      /**
       * Refer to the official documentation for [registerReceiver](https://developer.android.com/reference/androidx/core/content/ContextCompat#registerReceiver(android.content.Context,android.content.BroadcastReceiver,android.content.IntentFilter,int):
       * `registerReceiver(Context, BroadcastReceiver, IntentFilter, int)`.
-@@ -175,6 +197,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
+@@ -175,6 +198,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
       * Tests the real ping for all servers.
       */
      fun testAllRealPing() {
@@ -879,7 +887,7 @@ index 0eff1f0f..897bbec4 100644
          MessageUtil.sendMsg2TestService(
              getApplication(),
              TestServiceMessage(key = AppConfig.MSG_MEASURE_CONFIG_CANCEL)
-@@ -197,6 +220,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
+@@ -197,6 +221,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
          }
      }
  
@@ -912,7 +920,7 @@ index 0eff1f0f..897bbec4 100644
      /**
       * Tests the real ping for the current server.
       */
-@@ -369,6 +418,185 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
+@@ -369,6 +419,188 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
          MmkvManager.encodeServerList(sortedServerList, subId)
      }
  
@@ -1051,15 +1059,18 @@ index 0eff1f0f..897bbec4 100644
 +     */
 +    private suspend fun runSpeedTestAndWait(context: Context, guids: List<String>) {
 +        suspendCancellableCoroutine { cont ->
++            CoreNativeManager.initCoreEnv(context)
 +            val worker = SpeedTestWorkerService(
 +                context = context,
 +                guids = guids,
 +                onDelayResult = { guid, delay -> MmkvManager.encodeServerTestDelayMillis(guid, delay) },
 +                onSpeedResult = { guid, speed -> MmkvManager.encodeServerTestSpeedMbps(guid, speed) },
 +                onProgress = { text ->
-+                    autoActionStatus.value = AutoActionStatus(
-+                        running = true,
-+                        message = getApplication<AngApplication>().getString(R.string.connection_runing_task_left, text)
++                    autoActionStatus.postValue(
++                        AutoActionStatus(
++                            running = true,
++                            message = getApplication<AngApplication>().getString(R.string.connection_runing_task_left, text)
++                        )
 +                    )
 +                },
 +                onFinish = { _ ->
@@ -1098,7 +1109,7 @@ index 0eff1f0f..897bbec4 100644
  
      /**
       * Initializes assets.
-@@ -409,8 +637,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
+@@ -409,8 +641,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                  removeInvalidServer()
              }
  
@@ -1115,7 +1126,7 @@ index 0eff1f0f..897bbec4 100644
              }
  
              withContext(Dispatchers.Main) {
-@@ -458,6 +693,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
+@@ -458,6 +697,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                      updateListAction.value = getPosition(content ?: "")
                  }
  

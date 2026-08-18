@@ -13,6 +13,7 @@ import androidx.lifecycle.viewModelScope
 import com.v2ray.ang.AngApplication
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.R
+import com.v2ray.ang.core.CoreNativeManager
 import com.v2ray.ang.dto.GroupMapItem
 import com.v2ray.ang.dto.SubscriptionUpdateResult
 import com.v2ray.ang.dto.TestServiceMessage
@@ -553,15 +554,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     private suspend fun runSpeedTestAndWait(context: Context, guids: List<String>) {
         suspendCancellableCoroutine { cont ->
+            CoreNativeManager.initCoreEnv(context)
             val worker = SpeedTestWorkerService(
                 context = context,
                 guids = guids,
                 onDelayResult = { guid, delay -> MmkvManager.encodeServerTestDelayMillis(guid, delay) },
                 onSpeedResult = { guid, speed -> MmkvManager.encodeServerTestSpeedMbps(guid, speed) },
                 onProgress = { text ->
-                    autoActionStatus.value = AutoActionStatus(
-                        running = true,
-                        message = getApplication<AngApplication>().getString(R.string.connection_runing_task_left, text)
+                    autoActionStatus.postValue(
+                        AutoActionStatus(
+                            running = true,
+                            message = getApplication<AngApplication>().getString(R.string.connection_runing_task_left, text)
+                        )
                     )
                 },
                 onFinish = { _ ->
