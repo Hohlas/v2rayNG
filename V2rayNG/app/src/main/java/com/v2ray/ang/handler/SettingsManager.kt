@@ -457,7 +457,7 @@ object SettingsManager {
             .split(",")
             .map { it.trim() }
             .filter { it.isNotEmpty() }
-        return (savedUrls + defaultUrls).distinct()
+        return (defaultUrls + savedUrls).distinct()
     }
 
     fun getSpeedTestTimeoutMillis(): Int {

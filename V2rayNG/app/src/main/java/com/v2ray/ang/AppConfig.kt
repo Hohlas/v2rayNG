@@ -132,7 +132,7 @@ object AppConfig {
     const val TG_CHANNEL_URL = "https://t.me/github_2dust"
     const val DELAY_TEST_URL = "https://www.gstatic.com/generate_204"
     const val DELAY_TEST_URL2 = "https://www.google.com/generate_204"
-    const val SPEED_TEST_URL = "https://speed.cloudflare.com/__down?bytes=10000000,https://cachefly.cachefly.net/50mb.test"
+    const val SPEED_TEST_URL = "http://speedtest.tele2.net/100MB.zip,https://proof.ovh.net/files/100Mb.dat,http://speedtest.crn.ru/files/100MB.zip,http://ipv4.download.thinkbroadband.com/100MB.zip"
     const val SPEED_TEST_TIMEOUT = "15"
     const val SPEED_TEST_CONCURRENCY = "4"
 

@@ -19,7 +19,7 @@ new file mode 100644
 index 00000000..9d334374
 Binary files /dev/null and b/V2rayNG/app/libs/libv2ray.aar differ
 diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/AppConfig.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/AppConfig.kt
-index 714c0956..e879e81c 100644
+index 714c0956..6a55e2aa 100644
 --- a/V2rayNG/app/src/main/java/com/v2ray/ang/AppConfig.kt
 +++ b/V2rayNG/app/src/main/java/com/v2ray/ang/AppConfig.kt
 @@ -66,6 +66,9 @@ object AppConfig {
@@ -44,7 +44,7 @@ index 714c0956..e879e81c 100644
      const val TG_CHANNEL_URL = "https://t.me/github_2dust"
      const val DELAY_TEST_URL = "https://www.gstatic.com/generate_204"
      const val DELAY_TEST_URL2 = "https://www.google.com/generate_204"
-+    const val SPEED_TEST_URL = "https://speed.cloudflare.com/__down?bytes=10000000,https://cachefly.cachefly.net/50mb.test"
++    const val SPEED_TEST_URL = "http://speedtest.tele2.net/100MB.zip,https://proof.ovh.net/files/100Mb.dat,http://speedtest.crn.ru/files/100MB.zip,http://ipv4.download.thinkbroadband.com/100MB.zip"
 +    const val SPEED_TEST_TIMEOUT = "15"
 +    const val SPEED_TEST_CONCURRENCY = "4"
 +
@@ -230,7 +230,7 @@ index 958d5d0f..58e347af 100644
       * Removes all server configurations.
       *
 diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/handler/SettingsManager.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/handler/SettingsManager.kt
-index c5f08181..f92323a8 100644
+index c5f08181..1bc2d44d 100644
 --- a/V2rayNG/app/src/main/java/com/v2ray/ang/handler/SettingsManager.kt
 +++ b/V2rayNG/app/src/main/java/com/v2ray/ang/handler/SettingsManager.kt
 @@ -42,12 +42,47 @@ object SettingsManager {
@@ -301,7 +301,7 @@ index c5f08181..f92323a8 100644
 +            .split(",")
 +            .map { it.trim() }
 +            .filter { it.isNotEmpty() }
-+        return (savedUrls + defaultUrls).distinct()
++        return (defaultUrls + savedUrls).distinct()
 +    }
 +
 +    fun getSpeedTestTimeoutMillis(): Int {
