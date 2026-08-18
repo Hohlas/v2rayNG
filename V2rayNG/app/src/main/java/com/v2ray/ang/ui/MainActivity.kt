@@ -35,16 +35,13 @@ import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsChangeManager
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.handler.SubscriptionUpdater
-import com.v2ray.ang.service.SpeedTestWorkerService
 import com.v2ray.ang.util.LogUtil
 import com.v2ray.ang.util.Utils
 import com.v2ray.ang.viewmodel.MainViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import kotlin.coroutines.resume
 
 class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelectedListener {
     private val binding by lazy {
@@ -84,7 +81,7 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
         setupNavigationDrawer()
 
         binding.fab.setOnClickListener { handleFabAction() }
-        binding.fabAuto.setOnClickListener { handleAutoAction() }
+        binding.fabAuto.setOnClickListener { mainViewModel.startAutoAction() }
         binding.layoutTest.setOnClickListener { handleLayoutTestClick() }
 
         setupGroupTab()
@@ -125,6 +122,25 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
         mainViewModel.updateTestResultAction.observe(this) { setTestState(it) }
         mainViewModel.isRunning.observe(this) { isRunning ->
             applyRunningState(false, isRunning)
+        }
+        mainViewModel.autoActionStatus.observe(this) { status ->
+            binding.fabAuto.isEnabled = !status.running
+            binding.fabAuto.setImageResource(
+                if (status.running) R.drawable.ic_fab_check else R.drawable.ic_auto_magic
+            )
+
+            if (status.refreshTabs) {
+                refreshGroupTabTitles()
+            }
+            if (status.connectNow) {
+                mainViewModel.consumeAutoActionConnect()
+                setTestState(getString(R.string.auto_action_connecting))
+                connectToFastestServer()
+            } else if (status.running) {
+                setTestState(status.message)
+            } else if (status.message != null) {
+                setTestState(status.message)
+            }
         }
         mainViewModel.startListenBroadcast()
         mainViewModel.initAssets(assets)
@@ -195,98 +211,15 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
     }
 
     /**
-     * Runs the one-tap auto action:
-     * 1. Update all subscriptions (continue even on failure).
-     * 2. Speed test the current server list.
-     * 3. Sort the servers by speed test results.
-     * 4. Connect to the fastest server.
+     * Connects to the currently selected (fastest) server, restarting the service
+     * if it is already running. Handles the VPN permission dialog if needed.
      */
-    private var isAutoActionRunning = false
-
-    private fun handleAutoAction() {
-        if (isAutoActionRunning) {
-            return
-        }
-        isAutoActionRunning = true
-        binding.fabAuto.isEnabled = false
-        binding.fabAuto.setImageResource(R.drawable.ic_fab_check)
-
-        lifecycleScope.launch {
-            try {
-                runAutoSequence()
-            } finally {
-                isAutoActionRunning = false
-                binding.fabAuto.isEnabled = true
-                binding.fabAuto.setImageResource(R.drawable.ic_auto_magic)
-            }
-        }
-    }
-
-    private suspend fun runAutoSequence() {
-        // 1. Update subscription; continue to the next step even if it fails
-        setTestState(getString(R.string.auto_action_updating_subscription))
-        withContext(Dispatchers.IO) {
-            mainViewModel.updateConfigViaSubAll()
-        }
-        mainViewModel.reloadServerList()
-        refreshGroupTabTitles()
-
-        // 2. Speed test the current server list and wait for completion
-        val guids = mainViewModel.serversCache.map { it.guid }.toList()
-        if (guids.isNotEmpty()) {
-            MmkvManager.clearAllTestDelayResults(guids)
-            MmkvManager.clearAllTestSpeedResults(guids)
-            setTestState(getString(R.string.auto_action_speed_testing))
-            runSpeedTestAndWait(guids)
-        }
-
-        // 3. Sort by speed test results
-        setTestState(getString(R.string.auto_action_sorting))
-        withContext(Dispatchers.IO) {
-            mainViewModel.sortBySpeedTestResults()
-        }
-        mainViewModel.reloadServerList()
-
-        // 4. Connect the fastest server
-        val fastestGuid = mainViewModel.getFastestServerGuid()
-        if (fastestGuid.isNullOrEmpty()) {
-            setTestState(getString(R.string.auto_action_no_server))
+    private fun connectToFastestServer() {
+        val guid = MmkvManager.getSelectServer()
+        if (guid.isNullOrEmpty()) {
             toast(R.string.auto_action_no_server)
             return
         }
-        setTestState(getString(R.string.auto_action_connecting))
-        connectToFastestServer(fastestGuid)
-    }
-
-    /**
-     * Runs the speed test for the given servers and suspends until it finishes.
-     */
-    private suspend fun runSpeedTestAndWait(guids: List<String>) {
-        suspendCancellableCoroutine { cont ->
-            val worker = SpeedTestWorkerService(
-                context = this,
-                guids = guids,
-                onDelayResult = { guid, delay -> MmkvManager.encodeServerTestDelayMillis(guid, delay) },
-                onSpeedResult = { guid, speed -> MmkvManager.encodeServerTestSpeedMbps(guid, speed) },
-                onProgress = { text ->
-                    runOnUiThread { setTestState(getString(R.string.connection_runing_task_left, text)) }
-                },
-                onFinish = { _ ->
-                    if (cont.isActive) {
-                        cont.resume(Unit)
-                    }
-                }
-            )
-            cont.invokeOnCancellation { worker.cancel() }
-            worker.start()
-        }
-    }
-
-    /**
-     * Selects the given server and connects to it, restarting if the service is already running.
-     */
-    private fun connectToFastestServer(guid: String) {
-        MmkvManager.setSelectServer(guid)
         if (mainViewModel.isRunning.value == true) {
             restartV2Ray()
         } else if (SettingsManager.isVpnMode()) {
@@ -379,6 +312,13 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
             searchView.setOnCloseListener {
                 mainViewModel.filterConfig("")
                 false
+            }
+
+            // Restore the active search filter after a configuration change
+            val keyword = mainViewModel.keywordFilter
+            if (keyword.isNotEmpty()) {
+                searchItem.expandActionView()
+                searchView.setQuery(keyword, false)
             }
         }
         return super.onCreateOptionsMenu(menu)

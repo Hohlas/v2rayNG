@@ -25,15 +25,19 @@ import com.v2ray.ang.extension.toastSuccess
 import com.v2ray.ang.handler.AngConfigManager
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsManager
+import com.v2ray.ang.service.SpeedTestWorkerService
 import com.v2ray.ang.util.LogUtil
 import com.v2ray.ang.util.MessageUtil
 import com.v2ray.ang.util.Utils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.util.Collections
 import java.util.regex.PatternSyntaxException
+import kotlin.coroutines.resume
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var serverList = mutableListOf<String>() // MmkvManager.decodeServerList()
@@ -43,6 +47,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val isRunning by lazy { MutableLiveData<Boolean>() }
     val updateListAction by lazy { MutableLiveData<Int>() }
     val updateTestResultAction by lazy { MutableLiveData<String>() }
+
+    /**
+     * Status of the one-tap auto action (magic wand button).
+     * Lives in the ViewModel so it survives configuration changes.
+     */
+    data class AutoActionStatus(
+        val running: Boolean,
+        val message: String? = null,
+        val refreshTabs: Boolean = false,
+        val connectNow: Boolean = false
+    )
+
+    val autoActionStatus = MutableLiveData<AutoActionStatus>()
+    private var autoActionJob: Job? = null
+
     private val tcpingTestScope by lazy { CoroutineScope(Dispatchers.IO) }
     private var isDownloadSpeedTestRunning = false
 
@@ -449,9 +468,118 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         return ranked.maxWith(
             compareBy<Triple<String, Double, Int>> { if (it.second > 0.0) 1 else 0 }
-                .thenByDescending { it.second }
-                .thenBy { it.third }
+                .thenBy { it.second }
+                .thenByDescending { it.third }
         ).first
+    }
+
+    /**
+     * Starts the one-tap auto action in the ViewModel scope so it survives
+     * configuration changes. The pipeline is:
+     * 1. Update all subscriptions (continue even on failure).
+     * 2. Speed test the current server list.
+     * 3. Sort the servers by speed test results.
+     * 4. Signal the UI to connect to the fastest server.
+     */
+    fun startAutoAction() {
+        if (autoActionJob?.isActive == true) {
+            return
+        }
+        autoActionJob = viewModelScope.launch {
+            try {
+                runAutoSequence()
+            } catch (e: Exception) {
+                LogUtil.e(AppConfig.TAG, "Auto action failed", e)
+                autoActionStatus.value = AutoActionStatus(running = false)
+            }
+        }
+    }
+
+    private suspend fun runAutoSequence() {
+        val app = getApplication<AngApplication>()
+
+        // 1. Update subscription; continue to the next step even if it fails
+        autoActionStatus.value = AutoActionStatus(
+            running = true,
+            message = app.getString(R.string.auto_action_updating_subscription)
+        )
+        withContext(Dispatchers.IO) {
+            updateConfigViaSubAll()
+        }
+        reloadServerList()
+
+        // 2. Speed test the current server list and wait for completion
+        val guids = serversCache.map { it.guid }.toList()
+        if (guids.isNotEmpty()) {
+            MmkvManager.clearAllTestDelayResults(guids)
+            MmkvManager.clearAllTestSpeedResults(guids)
+            autoActionStatus.value = AutoActionStatus(
+                running = true,
+                message = app.getString(R.string.auto_action_speed_testing),
+                refreshTabs = true
+            )
+            runSpeedTestAndWait(app, guids)
+        }
+
+        // 3. Sort by speed test results
+        autoActionStatus.value = AutoActionStatus(
+            running = true,
+            message = app.getString(R.string.auto_action_sorting)
+        )
+        withContext(Dispatchers.IO) {
+            sortBySpeedTestResults()
+        }
+        reloadServerList()
+
+        // 4. Select the fastest server and ask the UI to connect
+        val fastestGuid = getFastestServerGuid()
+        if (fastestGuid.isNullOrEmpty()) {
+            autoActionStatus.value = AutoActionStatus(
+                running = false,
+                message = app.getString(R.string.auto_action_no_server)
+            )
+            return
+        }
+        MmkvManager.setSelectServer(fastestGuid)
+        autoActionStatus.value = AutoActionStatus(
+            running = false,
+            message = app.getString(R.string.auto_action_connecting),
+            connectNow = true
+        )
+    }
+
+    /**
+     * Runs the speed test for the given servers and suspends until it finishes.
+     */
+    private suspend fun runSpeedTestAndWait(context: Context, guids: List<String>) {
+        suspendCancellableCoroutine { cont ->
+            val worker = SpeedTestWorkerService(
+                context = context,
+                guids = guids,
+                onDelayResult = { guid, delay -> MmkvManager.encodeServerTestDelayMillis(guid, delay) },
+                onSpeedResult = { guid, speed -> MmkvManager.encodeServerTestSpeedMbps(guid, speed) },
+                onProgress = { text ->
+                    autoActionStatus.value = AutoActionStatus(
+                        running = true,
+                        message = getApplication<AngApplication>().getString(R.string.connection_runing_task_left, text)
+                    )
+                },
+                onFinish = { _ ->
+                    if (cont.isActive) {
+                        cont.resume(Unit)
+                    }
+                }
+            )
+            cont.invokeOnCancellation { worker.cancel() }
+            worker.start()
+        }
+    }
+
+    /**
+     * Marks the auto action connect signal as consumed so it fires only once.
+     */
+    fun consumeAutoActionConnect() {
+        autoActionStatus.value = AutoActionStatus(running = false)
     }
 
     private fun sortVisibleBySpeedTestResults() {

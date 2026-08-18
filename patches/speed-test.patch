@@ -674,7 +674,7 @@ index 00000000..cb50a683
 +    }
 +}
 diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/ui/MainActivity.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/ui/MainActivity.kt
-index 90a42e4c..e07f4329 100644
+index 90a42e4c..6e6b87ec 100644
 --- a/V2rayNG/app/src/main/java/com/v2ray/ang/ui/MainActivity.kt
 +++ b/V2rayNG/app/src/main/java/com/v2ray/ang/ui/MainActivity.kt
 @@ -6,6 +6,7 @@ import android.net.Uri
@@ -685,128 +685,54 @@ index 90a42e4c..e07f4329 100644
  import android.view.KeyEvent
  import android.view.Menu
  import android.view.MenuItem
-@@ -34,13 +35,16 @@ import com.v2ray.ang.handler.MmkvManager
- import com.v2ray.ang.handler.SettingsChangeManager
- import com.v2ray.ang.handler.SettingsManager
- import com.v2ray.ang.handler.SubscriptionUpdater
-+import com.v2ray.ang.service.SpeedTestWorkerService
- import com.v2ray.ang.util.LogUtil
- import com.v2ray.ang.util.Utils
- import com.v2ray.ang.viewmodel.MainViewModel
- import kotlinx.coroutines.Dispatchers
- import kotlinx.coroutines.delay
- import kotlinx.coroutines.launch
-+import kotlinx.coroutines.suspendCancellableCoroutine
- import kotlinx.coroutines.withContext
-+import kotlin.coroutines.resume
- 
- class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelectedListener {
-     private val binding by lazy {
-@@ -80,6 +84,7 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
+@@ -80,6 +81,7 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
          setupNavigationDrawer()
  
          binding.fab.setOnClickListener { handleFabAction() }
-+        binding.fabAuto.setOnClickListener { handleAutoAction() }
++        binding.fabAuto.setOnClickListener { mainViewModel.startAutoAction() }
          binding.layoutTest.setOnClickListener { handleLayoutTestClick() }
  
          setupGroupTab()
-@@ -189,6 +194,113 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
+@@ -121,6 +123,25 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
+         mainViewModel.isRunning.observe(this) { isRunning ->
+             applyRunningState(false, isRunning)
+         }
++        mainViewModel.autoActionStatus.observe(this) { status ->
++            binding.fabAuto.isEnabled = !status.running
++            binding.fabAuto.setImageResource(
++                if (status.running) R.drawable.ic_fab_check else R.drawable.ic_auto_magic
++            )
++
++            if (status.refreshTabs) {
++                refreshGroupTabTitles()
++            }
++            if (status.connectNow) {
++                mainViewModel.consumeAutoActionConnect()
++                setTestState(getString(R.string.auto_action_connecting))
++                connectToFastestServer()
++            } else if (status.running) {
++                setTestState(status.message)
++            } else if (status.message != null) {
++                setTestState(status.message)
++            }
++        }
+         mainViewModel.startListenBroadcast()
+         mainViewModel.initAssets(assets)
+     }
+@@ -189,6 +210,30 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
          }
      }
  
 +    /**
-+     * Runs the one-tap auto action:
-+     * 1. Update all subscriptions (continue even on failure).
-+     * 2. Speed test the current server list.
-+     * 3. Sort the servers by speed test results.
-+     * 4. Connect to the fastest server.
++     * Connects to the currently selected (fastest) server, restarting the service
++     * if it is already running. Handles the VPN permission dialog if needed.
 +     */
-+    private var isAutoActionRunning = false
-+
-+    private fun handleAutoAction() {
-+        if (isAutoActionRunning) {
-+            return
-+        }
-+        isAutoActionRunning = true
-+        binding.fabAuto.isEnabled = false
-+        binding.fabAuto.setImageResource(R.drawable.ic_fab_check)
-+
-+        lifecycleScope.launch {
-+            try {
-+                runAutoSequence()
-+            } finally {
-+                isAutoActionRunning = false
-+                binding.fabAuto.isEnabled = true
-+                binding.fabAuto.setImageResource(R.drawable.ic_auto_magic)
-+            }
-+        }
-+    }
-+
-+    private suspend fun runAutoSequence() {
-+        // 1. Update subscription; continue to the next step even if it fails
-+        setTestState(getString(R.string.auto_action_updating_subscription))
-+        withContext(Dispatchers.IO) {
-+            mainViewModel.updateConfigViaSubAll()
-+        }
-+        mainViewModel.reloadServerList()
-+        refreshGroupTabTitles()
-+
-+        // 2. Speed test the current server list and wait for completion
-+        val guids = mainViewModel.serversCache.map { it.guid }.toList()
-+        if (guids.isNotEmpty()) {
-+            MmkvManager.clearAllTestDelayResults(guids)
-+            MmkvManager.clearAllTestSpeedResults(guids)
-+            setTestState(getString(R.string.auto_action_speed_testing))
-+            runSpeedTestAndWait(guids)
-+        }
-+
-+        // 3. Sort by speed test results
-+        setTestState(getString(R.string.auto_action_sorting))
-+        withContext(Dispatchers.IO) {
-+            mainViewModel.sortBySpeedTestResults()
-+        }
-+        mainViewModel.reloadServerList()
-+
-+        // 4. Connect the fastest server
-+        val fastestGuid = mainViewModel.getFastestServerGuid()
-+        if (fastestGuid.isNullOrEmpty()) {
-+            setTestState(getString(R.string.auto_action_no_server))
++    private fun connectToFastestServer() {
++        val guid = MmkvManager.getSelectServer()
++        if (guid.isNullOrEmpty()) {
 +            toast(R.string.auto_action_no_server)
 +            return
 +        }
-+        setTestState(getString(R.string.auto_action_connecting))
-+        connectToFastestServer(fastestGuid)
-+    }
-+
-+    /**
-+     * Runs the speed test for the given servers and suspends until it finishes.
-+     */
-+    private suspend fun runSpeedTestAndWait(guids: List<String>) {
-+        suspendCancellableCoroutine { cont ->
-+            val worker = SpeedTestWorkerService(
-+                context = this,
-+                guids = guids,
-+                onDelayResult = { guid, delay -> MmkvManager.encodeServerTestDelayMillis(guid, delay) },
-+                onSpeedResult = { guid, speed -> MmkvManager.encodeServerTestSpeedMbps(guid, speed) },
-+                onProgress = { text ->
-+                    runOnUiThread { setTestState(getString(R.string.connection_runing_task_left, text)) }
-+                },
-+                onFinish = { _ ->
-+                    if (cont.isActive) {
-+                        cont.resume(Unit)
-+                    }
-+                }
-+            )
-+            cont.invokeOnCancellation { worker.cancel() }
-+            worker.start()
-+        }
-+    }
-+
-+    /**
-+     * Selects the given server and connects to it, restarting if the service is already running.
-+     */
-+    private fun connectToFastestServer(guid: String) {
-+        MmkvManager.setSelectServer(guid)
 +        if (mainViewModel.isRunning.value == true) {
 +            restartV2Ray()
 +        } else if (SettingsManager.isVpnMode()) {
@@ -824,7 +750,7 @@ index 90a42e4c..e07f4329 100644
      private fun startV2Ray() {
          if (MmkvManager.getSelectServer().isNullOrEmpty()) {
              toast(R.string.title_file_chooser)
-@@ -213,7 +325,11 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
+@@ -213,7 +258,11 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
      }
  
      private fun setTestState(content: String?) {
@@ -837,7 +763,21 @@ index 90a42e4c..e07f4329 100644
      }
  
      private fun applyRunningState(isLoading: Boolean, isRunning: Boolean) {
-@@ -345,6 +461,12 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
+@@ -264,6 +313,13 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
+                 mainViewModel.filterConfig("")
+                 false
+             }
++
++            // Restore the active search filter after a configuration change
++            val keyword = mainViewModel.keywordFilter
++            if (keyword.isNotEmpty()) {
++                searchItem.expandActionView()
++                searchView.setQuery(keyword, false)
++            }
+         }
+         return super.onCreateOptionsMenu(menu)
+     }
+@@ -345,6 +401,12 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
              true
          }
  
@@ -850,7 +790,7 @@ index 90a42e4c..e07f4329 100644
          R.id.service_restart -> {
              restartV2Ray()
              true
-@@ -693,4 +815,4 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
+@@ -693,4 +755,4 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
          tabMediator?.detach()
          super.onDestroy()
      }
@@ -884,27 +824,54 @@ index 4b340979..e6404014 100644
                          ContextCompat.startForegroundService(ctx, intent)
                      } else {
 diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/viewmodel/MainViewModel.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/viewmodel/MainViewModel.kt
-index 0eff1f0f..22e2a471 100644
+index 0eff1f0f..897bbec4 100644
 --- a/V2rayNG/app/src/main/java/com/v2ray/ang/viewmodel/MainViewModel.kt
 +++ b/V2rayNG/app/src/main/java/com/v2ray/ang/viewmodel/MainViewModel.kt
-@@ -28,6 +28,7 @@ import com.v2ray.ang.handler.SettingsManager
+@@ -25,14 +25,19 @@ import com.v2ray.ang.extension.toastSuccess
+ import com.v2ray.ang.handler.AngConfigManager
+ import com.v2ray.ang.handler.MmkvManager
+ import com.v2ray.ang.handler.SettingsManager
++import com.v2ray.ang.service.SpeedTestWorkerService
  import com.v2ray.ang.util.LogUtil
  import com.v2ray.ang.util.MessageUtil
  import com.v2ray.ang.util.Utils
 +import kotlinx.coroutines.CoroutineScope
  import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.Job
  import kotlinx.coroutines.launch
++import kotlinx.coroutines.suspendCancellableCoroutine
  import kotlinx.coroutines.withContext
-@@ -42,6 +43,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
-     val isRunning by lazy { MutableLiveData<Boolean>() }
+ import java.util.Collections
+ import java.util.regex.PatternSyntaxException
++import kotlin.coroutines.resume
+ 
+ class MainViewModel(application: Application) : AndroidViewModel(application) {
+     private var serverList = mutableListOf<String>() // MmkvManager.decodeServerList()
+@@ -43,6 +48,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      val updateListAction by lazy { MutableLiveData<Int>() }
      val updateTestResultAction by lazy { MutableLiveData<String>() }
+ 
++    /**
++     * Status of the one-tap auto action (magic wand button).
++     * Lives in the ViewModel so it survives configuration changes.
++     */
++    data class AutoActionStatus(
++        val running: Boolean,
++        val message: String? = null,
++        val refreshTabs: Boolean = false,
++        val connectNow: Boolean = false
++    )
++
++    val autoActionStatus = MutableLiveData<AutoActionStatus>()
++    private var autoActionJob: Job? = null
++
 +    private val tcpingTestScope by lazy { CoroutineScope(Dispatchers.IO) }
 +    private var isDownloadSpeedTestRunning = false
- 
++
      /**
       * Refer to the official documentation for [registerReceiver](https://developer.android.com/reference/androidx/core/content/ContextCompat#registerReceiver(android.content.Context,android.content.BroadcastReceiver,android.content.IntentFilter,int):
-@@ -175,6 +178,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
+      * `registerReceiver(Context, BroadcastReceiver, IntentFilter, int)`.
+@@ -175,6 +197,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
       * Tests the real ping for all servers.
       */
      fun testAllRealPing() {
@@ -912,7 +879,7 @@ index 0eff1f0f..22e2a471 100644
          MessageUtil.sendMsg2TestService(
              getApplication(),
              TestServiceMessage(key = AppConfig.MSG_MEASURE_CONFIG_CANCEL)
-@@ -197,6 +201,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
+@@ -197,6 +220,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
          }
      }
  
@@ -945,7 +912,7 @@ index 0eff1f0f..22e2a471 100644
      /**
       * Tests the real ping for the current server.
       */
-@@ -369,6 +399,76 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
+@@ -369,6 +418,185 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
          MmkvManager.encodeServerList(sortedServerList, subId)
      }
  
@@ -999,9 +966,118 @@ index 0eff1f0f..22e2a471 100644
 +        }
 +        return ranked.maxWith(
 +            compareBy<Triple<String, Double, Int>> { if (it.second > 0.0) 1 else 0 }
-+                .thenByDescending { it.second }
-+                .thenBy { it.third }
++                .thenBy { it.second }
++                .thenByDescending { it.third }
 +        ).first
++    }
++
++    /**
++     * Starts the one-tap auto action in the ViewModel scope so it survives
++     * configuration changes. The pipeline is:
++     * 1. Update all subscriptions (continue even on failure).
++     * 2. Speed test the current server list.
++     * 3. Sort the servers by speed test results.
++     * 4. Signal the UI to connect to the fastest server.
++     */
++    fun startAutoAction() {
++        if (autoActionJob?.isActive == true) {
++            return
++        }
++        autoActionJob = viewModelScope.launch {
++            try {
++                runAutoSequence()
++            } catch (e: Exception) {
++                LogUtil.e(AppConfig.TAG, "Auto action failed", e)
++                autoActionStatus.value = AutoActionStatus(running = false)
++            }
++        }
++    }
++
++    private suspend fun runAutoSequence() {
++        val app = getApplication<AngApplication>()
++
++        // 1. Update subscription; continue to the next step even if it fails
++        autoActionStatus.value = AutoActionStatus(
++            running = true,
++            message = app.getString(R.string.auto_action_updating_subscription)
++        )
++        withContext(Dispatchers.IO) {
++            updateConfigViaSubAll()
++        }
++        reloadServerList()
++
++        // 2. Speed test the current server list and wait for completion
++        val guids = serversCache.map { it.guid }.toList()
++        if (guids.isNotEmpty()) {
++            MmkvManager.clearAllTestDelayResults(guids)
++            MmkvManager.clearAllTestSpeedResults(guids)
++            autoActionStatus.value = AutoActionStatus(
++                running = true,
++                message = app.getString(R.string.auto_action_speed_testing),
++                refreshTabs = true
++            )
++            runSpeedTestAndWait(app, guids)
++        }
++
++        // 3. Sort by speed test results
++        autoActionStatus.value = AutoActionStatus(
++            running = true,
++            message = app.getString(R.string.auto_action_sorting)
++        )
++        withContext(Dispatchers.IO) {
++            sortBySpeedTestResults()
++        }
++        reloadServerList()
++
++        // 4. Select the fastest server and ask the UI to connect
++        val fastestGuid = getFastestServerGuid()
++        if (fastestGuid.isNullOrEmpty()) {
++            autoActionStatus.value = AutoActionStatus(
++                running = false,
++                message = app.getString(R.string.auto_action_no_server)
++            )
++            return
++        }
++        MmkvManager.setSelectServer(fastestGuid)
++        autoActionStatus.value = AutoActionStatus(
++            running = false,
++            message = app.getString(R.string.auto_action_connecting),
++            connectNow = true
++        )
++    }
++
++    /**
++     * Runs the speed test for the given servers and suspends until it finishes.
++     */
++    private suspend fun runSpeedTestAndWait(context: Context, guids: List<String>) {
++        suspendCancellableCoroutine { cont ->
++            val worker = SpeedTestWorkerService(
++                context = context,
++                guids = guids,
++                onDelayResult = { guid, delay -> MmkvManager.encodeServerTestDelayMillis(guid, delay) },
++                onSpeedResult = { guid, speed -> MmkvManager.encodeServerTestSpeedMbps(guid, speed) },
++                onProgress = { text ->
++                    autoActionStatus.value = AutoActionStatus(
++                        running = true,
++                        message = getApplication<AngApplication>().getString(R.string.connection_runing_task_left, text)
++                    )
++                },
++                onFinish = { _ ->
++                    if (cont.isActive) {
++                        cont.resume(Unit)
++                    }
++                }
++            )
++            cont.invokeOnCancellation { worker.cancel() }
++            worker.start()
++        }
++    }
++
++    /**
++     * Marks the auto action connect signal as consumed so it fires only once.
++     */
++    fun consumeAutoActionConnect() {
++        autoActionStatus.value = AutoActionStatus(running = false)
 +    }
 +
 +    private fun sortVisibleBySpeedTestResults() {
@@ -1022,7 +1098,7 @@ index 0eff1f0f..22e2a471 100644
  
      /**
       * Initializes assets.
-@@ -409,8 +509,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
+@@ -409,8 +637,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                  removeInvalidServer()
              }
  
@@ -1039,7 +1115,7 @@ index 0eff1f0f..22e2a471 100644
              }
  
              withContext(Dispatchers.Main) {
-@@ -458,6 +565,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
+@@ -458,6 +693,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                      updateListAction.value = getPosition(content ?: "")
                  }
  
@@ -1058,10 +1134,10 @@ index 0eff1f0f..22e2a471 100644
                      updateTestResultAction.value =
 diff --git a/V2rayNG/app/src/main/res/drawable/ic_auto_magic.xml b/V2rayNG/app/src/main/res/drawable/ic_auto_magic.xml
 new file mode 100644
-index 00000000..289c7f9b
+index 00000000..0a46065f
 --- /dev/null
 +++ b/V2rayNG/app/src/main/res/drawable/ic_auto_magic.xml
-@@ -0,0 +1,18 @@
+@@ -0,0 +1,12 @@
 +<vector xmlns:android="http://schemas.android.com/apk/res/android"
 +    android:width="24dp"
 +    android:height="24dp"
@@ -1069,16 +1145,10 @@ index 00000000..289c7f9b
 +    android:viewportHeight="24.0">
 +    <path
 +        android:fillColor="#FFFFFFFF"
-+        android:pathData="M7.5,5.6L10,7 8.6,4.5 10,2 7.5,3.4 5,2l1.4,2.5L5,7z" />
++        android:pathData="M4.72,16.46 L7.28,19.54 L19.28,9.54 L16.72,6.46 Z" />
 +    <path
 +        android:fillColor="#FFFFFFFF"
-+        android:pathData="M19.5,15.4L17,14l1.4,2.5L17,19l2.5,-1.4L22,19l-1.4,-2.5L22,14z" />
-+    <path
-+        android:fillColor="#FFFFFFFF"
-+        android:pathData="M22,2l-2.5,1.4L17,2l1.4,2.5L17,7l2.5,-1.4L22,7l-1.4,-2.5z" />
-+    <path
-+        android:fillColor="#FFFFFFFF"
-+        android:pathData="M12.88,8.29l-1.17,1.17c-0.39,0.39 -1.02,0.39 -1.41,0l-5.76,-5.76c-0.39,-0.39 -0.39,-1.02 0,-1.41l1.17,-1.17c0.39,-0.39 1.02,-0.39 1.41,0l5.76,5.76c0.39,0.39 0.39,1.02 0,1.41zM12.88,15.71l-6.59,6.59c-0.39,0.39 -1.02,0.39 -1.41,0c-0.39,-0.39 -0.39,-1.02 0,-1.41l6.59,-6.59c0.39,-0.39 1.02,-0.39 1.41,0c0.39,0.39 0.39,1.02 0,1.41z" />
++        android:pathData="M18,3.8 L18.76,5.95 L21.04,6.01 L19.24,7.4 L19.88,9.59 L18,8.3 L16.12,9.59 L16.76,7.4 L14.96,6.01 L17.24,5.95 Z" />
 +</vector>
 \ No newline at end of file
 diff --git a/V2rayNG/app/src/main/res/layout/activity_main.xml b/V2rayNG/app/src/main/res/layout/activity_main.xml
