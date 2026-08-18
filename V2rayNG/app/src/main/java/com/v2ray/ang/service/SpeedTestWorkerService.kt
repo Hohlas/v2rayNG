@@ -150,11 +150,7 @@ class SpeedTestWorkerService(
             val controller = CoreNativeManager.newCoreController(SpeedTestCoreCallback())
             return try {
                 controller.startLoop(config, 0)
-                var started = 0
-                while (!controller.isRunning && started < 20) {
-                    delay(100)
-                    started++
-                }
+                delay(600)
                 if (!controller.isRunning) {
                     LogUtil.w(AppConfig.TAG, "Speed test core did not start for $guid")
                     return 0.0
@@ -169,6 +165,7 @@ class SpeedTestWorkerService(
                         }
                     }
                 }
+                LogUtil.w(AppConfig.TAG, "Speed test produced no speed for $guid after retries")
                 0.0
             } catch (e: Exception) {
                 LogUtil.e(AppConfig.TAG, "Speed test failed for $guid", e)

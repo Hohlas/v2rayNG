@@ -67,6 +67,27 @@ index 714c0956..e879e81c 100644
  
      /** Notification channel IDs and names. */
      const val RAY_NG_CHANNEL_ID = "RAY_NG_M_CH_ID"
+diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/core/CoreConfigManager.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/core/CoreConfigManager.kt
+index 0e64cf89..6e1e7f9d 100644
+--- a/V2rayNG/app/src/main/java/com/v2ray/ang/core/CoreConfigManager.kt
++++ b/V2rayNG/app/src/main/java/com/v2ray/ang/core/CoreConfigManager.kt
+@@ -395,7 +395,15 @@ object CoreConfigManager {
+         v2rayConfig.log.loglevel = MmkvManager.decodeSettingsString(AppConfig.PREF_LOGLEVEL) ?: "warning"
+         v2rayConfig.inbounds.clear()
+         v2rayConfig.routing.rules.clear()
+-        v2rayConfig.dns = null
++        // Keep the resolved outbound domain->IP pins from the main config so
++        // the test core connects to the same server address the running core
++        // uses, instead of re-resolving the server domain at test time.
++        val pinnedHosts = v2rayConfig.dns?.hosts
++        v2rayConfig.dns = if (pinnedHosts.isNullOrEmpty()) {
++            null
++        } else {
++            V2rayConfig.DnsBean(hosts = pinnedHosts)
++        }
+         v2rayConfig.fakedns = null
+         v2rayConfig.stats = null
+         v2rayConfig.policy = null
 diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/core/CoreServiceManager.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/core/CoreServiceManager.kt
 index 2076ed02..e9704946 100644
 --- a/V2rayNG/app/src/main/java/com/v2ray/ang/core/CoreServiceManager.kt
@@ -424,10 +445,10 @@ index b3d8382b..74076bcb 100644
 +}
 diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/service/SpeedTestWorkerService.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/service/SpeedTestWorkerService.kt
 new file mode 100644
-index 00000000..df17ed20
+index 00000000..0320ae37
 --- /dev/null
 +++ b/V2rayNG/app/src/main/java/com/v2ray/ang/service/SpeedTestWorkerService.kt
-@@ -0,0 +1,264 @@
+@@ -0,0 +1,261 @@
 +package com.v2ray.ang.service
 +
 +import android.content.Context
@@ -580,11 +601,7 @@ index 00000000..df17ed20
 +            val controller = CoreNativeManager.newCoreController(SpeedTestCoreCallback())
 +            return try {
 +                controller.startLoop(config, 0)
-+                var started = 0
-+                while (!controller.isRunning && started < 20) {
-+                    delay(100)
-+                    started++
-+                }
++                delay(600)
 +                if (!controller.isRunning) {
 +                    LogUtil.w(AppConfig.TAG, "Speed test core did not start for $guid")
 +                    return 0.0
@@ -599,6 +616,7 @@ index 00000000..df17ed20
 +                        }
 +                    }
 +                }
++                LogUtil.w(AppConfig.TAG, "Speed test produced no speed for $guid after retries")
 +                0.0
 +            } catch (e: Exception) {
 +                LogUtil.e(AppConfig.TAG, "Speed test failed for $guid", e)

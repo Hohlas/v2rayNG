@@ -395,7 +395,15 @@ object CoreConfigManager {
         v2rayConfig.log.loglevel = MmkvManager.decodeSettingsString(AppConfig.PREF_LOGLEVEL) ?: "warning"
         v2rayConfig.inbounds.clear()
         v2rayConfig.routing.rules.clear()
-        v2rayConfig.dns = null
+        // Keep the resolved outbound domain->IP pins from the main config so
+        // the test core connects to the same server address the running core
+        // uses, instead of re-resolving the server domain at test time.
+        val pinnedHosts = v2rayConfig.dns?.hosts
+        v2rayConfig.dns = if (pinnedHosts.isNullOrEmpty()) {
+            null
+        } else {
+            V2rayConfig.DnsBean(hosts = pinnedHosts)
+        }
         v2rayConfig.fakedns = null
         v2rayConfig.stats = null
         v2rayConfig.policy = null
