@@ -6,6 +6,7 @@ import android.net.Uri
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
+import android.text.Html
 import android.view.KeyEvent
 import android.view.Menu
 import android.view.MenuItem
@@ -213,7 +214,11 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
     }
 
     private fun setTestState(content: String?) {
-        binding.tvTestState.text = content
+        binding.tvTestState.text = if (!content.isNullOrEmpty() && content.contains('<')) {
+            Html.fromHtml(content, Html.FROM_HTML_MODE_LEGACY)
+        } else {
+            content
+        }
     }
 
     private fun applyRunningState(isLoading: Boolean, isRunning: Boolean) {

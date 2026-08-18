@@ -1,606 +1,3 @@
-diff --git a/DEBUG_INSTRUCTIONS.md b/DEBUG_INSTRUCTIONS.md
-new file mode 100644
-index 00000000..1ce41cf3
---- /dev/null
-+++ b/DEBUG_INSTRUCTIONS.md
-@@ -0,0 +1,458 @@
-+# v2rayNG Speed Test Patch Maintenance Guide
-+
-+This repository is a working fork used to maintain a local Speed Test patch for
-+v2rayNG. The upstream maintainer declined the pull request, so the patch must be
-+re-applied when a new upstream v2rayNG version is released.
-+
-+This document is written as a handoff note for a future human or AI agent. It
-+contains the project context, the known build-library issue, the patch workflow,
-+and the debugging/install steps needed to produce and test an APK on a phone.
-+
-+## Current Branches And Commits
-+
-+The original successful reusable patch was created on:
-+
-+```bash
-+speed-test-2.0.18
-+```
-+
-+Important commits:
-+
-+```text
-+42e7f95e  tag: 2.0.18, upstream release base
-+5adf2282  fix: add build configuration and documentation for APK assembly
-+79d3f8ab  feat: add reusable speed test patch
-+```
-+
-+The patch was later ported to upstream tag `2.1.5` on:
-+
-+```bash
-+speed-test-2.1.5
-+```
-+
-+Important commits on the 2.1.5 maintenance branch:
-+
-+```text
-+4c86e7c2  tag: 2.1.5, upstream release base
-+e8f26bc9  fix: add build configuration and documentation for APK assembly
-+```
-+
-+The 2.1.5 port adapts the patch from the old `V2RayTestService.kt` flow to the
-+new upstream test architecture:
-+
-+```text
-+CoreTestService.kt
-+RealPingWorkerService.kt
-+SpeedtestManager.kt
-+TestServiceMessage.kt
-+```
-+
-+The clean upstream PR branch was:
-+
-+```bash
-+feature/speed-test
-+```
-+
-+PR:
-+
-+```text
-+https://github.com/2dust/v2rayNG/pull/5526
-+```
-+
-+That PR was intentionally clean and did not include the local build workaround
-+or binary AAR files. The maintenance branches such as `speed-test-2.0.18` and
-+`speed-test-2.1.5` are the practical branches to use for future local builds.
-+
-+## What The Patch Adds
-+
-+The patch adds a new menu item:
-+
-+```text
-+Speed test
-+```
-+
-+Behavior:
-+
-+1. Start with the existing real delay test.
-+2. Keep only profiles with successful real delay results.
-+3. Start a temporary core instance per profile for download testing.
-+4. Download a test file through the temporary local proxy.
-+5. Display download speed next to the real delay value in the server list.
-+6. Show speed values in blue.
-+
-+User settings added:
-+
-+```text
-+Speed test URL
-+Speed test timeout, seconds
-+Speed test concurrency (1-8)
-+```
-+
-+Default URLs:
-+
-+```text
-+https://speed.cloudflare.com/__down?bytes=10000000
-+https://cachefly.cachefly.net/50mb.test
-+```
-+
-+Implementation files touched by the patch:
-+
-+```text
-+V2rayNG/app/src/main/java/com/v2ray/ang/AppConfig.kt
-+V2rayNG/app/src/main/java/com/v2ray/ang/dto/ServerAffiliationInfo.kt
-+V2rayNG/app/src/main/java/com/v2ray/ang/handler/MmkvManager.kt
-+V2rayNG/app/src/main/java/com/v2ray/ang/handler/SettingsManager.kt
-+V2rayNG/app/src/main/java/com/v2ray/ang/service/CoreTestService.kt
-+V2rayNG/app/src/main/java/com/v2ray/ang/service/SpeedTestWorkerService.kt
-+V2rayNG/app/src/main/java/com/v2ray/ang/ui/MainActivity.kt
-+V2rayNG/app/src/main/java/com/v2ray/ang/ui/MainRecyclerAdapter.kt
-+V2rayNG/app/src/main/java/com/v2ray/ang/util/MessageUtil.kt
-+V2rayNG/app/src/main/java/com/v2ray/ang/viewmodel/MainViewModel.kt
-+V2rayNG/app/src/main/res/layout/item_recycler_main.xml
-+V2rayNG/app/src/main/res/menu/menu_main.xml
-+V2rayNG/app/src/main/res/values-ru/strings.xml
-+V2rayNG/app/src/main/res/values/colors.xml
-+V2rayNG/app/src/main/res/values/strings.xml
-+V2rayNG/app/src/main/res/xml/pref_settings.xml
-+```
-+
-+The reusable patch and helper script are:
-+
-+```text
-+patches/speed-test.patch
-+apply_speed_test_patch.sh
-+```
-+
-+Example result screenshot:
-+
-+```text
-+screen_2026-04-21_22-44-38.jpg
-+```
-+
-+## Known Build-Library Context
-+
-+Upstream v2rayNG source may not build directly from a release tag in this local
-+environment because generated/native Android library artifacts are missing.
-+
-+Typical compile errors:
-+
-+```text
-+Unresolved reference 'go'
-+Unresolved reference 'libv2ray'
-+Unresolved reference 'Libv2ray'
-+Unresolved reference 'CoreController'
-+Unresolved reference 'CoreCallbackHandler'
-+```
-+
-+The local build workaround is documented in:
-+
-+```text
-+V2rayNG/BUILD_INSTRUCTIONS.md
-+```
-+
-+In short, a working APK build needs AAR files under:
-+
-+```text
-+V2rayNG/app/libs/
-+```
-+
-+Known required libraries:
-+
-+```text
-+libv2ray.aar
-+libhev-socks5-tunnel.aar
-+```
-+
-+Important: do not keep unpacked native libraries under:
-+
-+```text
-+V2rayNG/app/src/main/jniLibs/
-+```
-+
-+This path is ignored by git, but Gradle still packages files from it. During the
-+2.1.5 port an old local `app/src/main/jniLibs/arm64-v8a/libgojni.so` overrode
-+the correct `libgojni.so` from `app/libs/libv2ray.aar`. The APK built
-+successfully, but VPN startup crashed with:
-+
-+```text
-+java.lang.UnsatisfiedLinkError: No implementation found for
-+void libv2ray.CoreController.registerProcessFinder(libv2ray.ProcessFinder)
-+```
-+
-+Fix:
-+
-+```bash
-+rm -rf V2rayNG/app/src/main/jniLibs
-+cd V2rayNG
-+./gradlew clean assembleRelease
-+```
-+
-+After the clean rebuild, the warning about duplicate `lib/arm64-v8a/libgojni.so`
-+must disappear.
-+
-+The original build-fix branch/commit supplied the missing local build setup:
-+
-+```text
-+origin/fix/build-with-hev-library
-+a7093199999913a9d12598254640d86fa89ee1e8
-+```
-+
-+In this repository that fix is represented on the maintenance branch as:
-+
-+```text
-+5adf2282 fix: add build configuration and documentation for APK assembly
-+```
-+
-+When updating to a newer upstream release, keep this distinction clear:
-+
-+- The Speed Test patch is feature code.
-+- The build-library fix is only for local APK building.
-+- Do not include large binary build artifacts in a public upstream PR unless the
-+  upstream maintainer explicitly asks for them.
-+
-+## Updating To A New Upstream Version
-+
-+Use this when upstream releases a new version and the local patched APK must be
-+rebuilt.
-+
-+Start from the repository root:
-+
-+```bash
-+cd /home/hohla/git/v2rayNG
-+```
-+
-+Fetch upstream tags and branches:
-+
-+```bash
-+git fetch upstream --tags
-+```
-+
-+Inspect recent tags:
-+
-+```bash
-+git tag --sort=-version:refname | head -20
-+```
-+
-+Create a fresh maintenance branch from the new upstream tag:
-+
-+```bash
-+git switch -c speed-test-X.Y.Z tags/X.Y.Z
-+```
-+
-+Replace `X.Y.Z` with the new upstream version.
-+
-+Apply the local build fix. Prefer cherry-picking the known commit if it still
-+applies:
-+
-+```bash
-+git cherry-pick 5adf2282
-+```
-+
-+If it conflicts, resolve only build-related files. The relevant context is in
-+`V2rayNG/BUILD_INSTRUCTIONS.md`.
-+
-+Then apply the Speed Test patch:
-+
-+```bash
-+./apply_speed_test_patch.sh
-+```
-+
-+The script runs `git apply --3way patches/speed-test.patch`. If conflicts occur,
-+resolve them in the touched files listed above.
-+
-+After resolving conflicts:
-+
-+```bash
-+git status --short
-+git diff --check
-+git add <resolved-files>
-+git commit -m "feat: add reusable speed test patch"
-+```
-+
-+Regenerate the reusable patch for the next version after the code is final:
-+
-+```bash
-+git diff HEAD~1..HEAD -- V2rayNG/app --output=patches/speed-test.patch
-+git add patches/speed-test.patch
-+git commit -m "chore: refresh speed test patch for X.Y.Z"
-+```
-+
-+If the previous commit already included the patch file, amend instead:
-+
-+```bash
-+git add patches/speed-test.patch
-+git commit --amend --no-edit
-+```
-+
-+## Building APK
-+
-+Go into the Android project directory:
-+
-+```bash
-+cd /home/hohla/git/v2rayNG/V2rayNG
-+```
-+
-+Make sure the required libraries exist:
-+
-+```bash
-+ls -lh app/libs/
-+```
-+
-+Expected:
-+
-+```text
-+libv2ray.aar
-+libhev-socks5-tunnel.aar
-+```
-+
-+Build release APKs:
-+
-+```bash
-+./gradlew assembleRelease
-+```
-+
-+APK output directory:
-+
-+```text
-+V2rayNG/app/build/outputs/apk/playstore/release/
-+```
-+
-+For a modern Android phone, the usual APK is:
-+
-+```text
-+v2rayNG_X.Y.Z_arm64-v8a.apk
-+```
-+
-+There may also be a universal APK:
-+
-+```text
-+v2rayNG_X.Y.Z_universal.apk
-+```
-+
-+## Installing On A Phone
-+
-+ADB path used in this environment:
-+
-+```bash
-+/home/hohla/Android/Sdk/platform-tools/adb
-+```
-+
-+Check connected devices:
-+
-+```bash
-+/home/hohla/Android/Sdk/platform-tools/adb devices
-+```
-+
-+Install:
-+
-+```bash
-+/home/hohla/Android/Sdk/platform-tools/adb install -r V2rayNG/app/build/outputs/apk/playstore/release/v2rayNG_X.Y.Z_arm64-v8a.apk
-+```
-+
-+If Android says the app conflicts with another package, this is usually a signing
-+key mismatch. The patched APK is signed locally, while the original app may have
-+been signed by upstream, GitHub release, F-Droid, or Play Store.
-+
-+Fix:
-+
-+```bash
-+/home/hohla/Android/Sdk/platform-tools/adb uninstall com.v2ray.ang
-+/home/hohla/Android/Sdk/platform-tools/adb install V2rayNG/app/build/outputs/apk/playstore/release/v2rayNG_X.Y.Z_arm64-v8a.apk
-+```
-+
-+Warning: uninstalling removes app data unless the device or Android version keeps
-+backups. Export subscriptions/configs before uninstalling if needed.
-+
-+Google Play Protect may ask to scan the manually installed APK. That is normal
-+for sideloaded APKs and is not specific to this patch.
-+
-+## Manual Test Plan
-+
-+1. Open v2rayNG on the phone.
-+2. Ensure there are several profiles in the list.
-+3. Open the three-dot menu.
-+4. Run the existing real delay action and confirm it still completes quickly.
-+5. Open the three-dot menu again.
-+6. Run `Speed test`.
-+7. Confirm real delay runs first.
-+8. Confirm only successful real-delay profiles proceed to speed testing.
-+9. Confirm speed values appear to the right of delay values.
-+10. Confirm speed values are blue.
-+11. Open Settings and verify speed test URL, timeout, and concurrency fields.
-+
-+Expected behavior:
-+
-+- Real delay phase should run in parallel, not one profile at a time.
-+- Speed test phase should use configurable concurrency from 1 to 8.
-+- Invalid or tiny URL responses should be skipped and fallback URLs tried.
-+- Speeds below `0.05 Mbps` are not displayed.
-+
-+## Debugging
-+
-+Clear logs:
-+
-+```bash
-+/home/hohla/Android/Sdk/platform-tools/adb logcat -c
-+```
-+
-+Run the app and collect logs:
-+
-+```bash
-+/home/hohla/Android/Sdk/platform-tools/adb logcat | tee v2rayng.log
-+```
-+
-+Useful filters:
-+
-+```bash
-+/home/hohla/Android/Sdk/platform-tools/adb logcat | grep -i "speed"
-+/home/hohla/Android/Sdk/platform-tools/adb logcat | grep -i "v2ray"
-+```
-+
-+Stop the app:
-+
-+```bash
-+/home/hohla/Android/Sdk/platform-tools/adb shell am force-stop com.v2ray.ang
-+```
-+
-+If the Speed Test menu item exists but no speed appears:
-+
-+1. Check that real delay results are positive.
-+2. Check that speed test URLs are reachable.
-+3. Try Cloudflare first:
-+
-+   ```text
-+   https://speed.cloudflare.com/__down?bytes=10000000
-+   ```
-+
-+4. Avoid URLs that return tiny placeholder responses. Earlier testing showed
-+   some proxies returned only a few bytes from `cachefly`, so the implementation
-+   treats very small downloads as invalid and tries the next URL.
-+
-+If the real delay phase inside Speed Test is very slow:
-+
-+- Ensure the delay phase is parallelized similarly to `RealPingWorkerService`.
-+- A previous failed implementation checked profiles sequentially, causing one
-+  server to take 5-10 seconds and making large lists unusable.
-+
-+## Public PR Notes
-+
-+The upstream PR was declined, but the clean branch is still useful as reference:
-+
-+```text
-+feature/speed-test
-+ae623ffb feat: add profile download speed test
-+https://github.com/2dust/v2rayNG/pull/5526
-+```
-+
-+For future upstream attempts, keep the PR focused on feature code only. Do not
-+include:
-+
-+```text
-+libv2ray.aar
-+libhev-socks5-tunnel.aar
-+BUILD_INSTRUCTIONS.md
-+patches/speed-test.patch
-+apply_speed_test_patch.sh
-+```
-+
-+For local maintenance builds, use `speed-test-2.0.18` and this document.
-diff --git a/V2rayNG/.gitignore b/V2rayNG/.gitignore
-new file mode 100644
-index 00000000..d4be9aee
---- /dev/null
-+++ b/V2rayNG/.gitignore
-@@ -0,0 +1,27 @@
-+# Gradle
-+.gradle/
-+build/
-+!gradle/wrapper/gradle-wrapper.jar
-+!**/src/main/**/build/
-+
-+# Kotlin
-+*.class
-+*.jar
-+*.war
-+*.ear
-+*.kotlin_module
-+
-+# Android Studio / IntelliJ
-+.idea/
-+*.iml
-+*.iws
-+*.ipr
-+.nanoeditordirectory
-+local.properties
-+
-+# OS
-+.DS_Store
-+Thumbs.db
-+
-+# Logs
-+*.log
-\ No newline at end of file
-diff --git a/V2rayNG/BUILD_INSTRUCTIONS.md b/V2rayNG/BUILD_INSTRUCTIONS.md
-new file mode 100644
-index 00000000..d260124c
---- /dev/null
-+++ b/V2rayNG/BUILD_INSTRUCTIONS.md
-@@ -0,0 +1,99 @@
-+# Инструкция по сборке APK v2rayNG
-+
-+## Необходимые файлы в app/libs/
-+
-+Для сборки рабочего APK требуются два AAR-файла в директории `app/libs/`:
-+
-+1. **libv2ray.aar** — основное ядро Xray/v2ray
-+   - Скачать: https://github.com/2dust/AndroidLibXrayLite/releases/latest
-+   - Файл: `libv2ray.aar`
-+
-+2. **libhev-socks5-tunnel.aar** — библиотека для HevTUN режима
-+   - Уже включена в проект (создана локально)
-+
-+## Процесс сборки новой версии
-+
-+### 1. Переключиться на нужный тег
-+
-+```bash
-+cd /home/hohla/git/v2rayNG/V2rayNG
-+git fetch upstream --tags
-+git checkout --force tags/X.X.X  # заменить X.X.X на нужную версию
-+```
-+
-+### 2. Добавить подпис debug-ключом
-+
-+В файле `app/build.gradle.kts` найти блок `buildTypes { release { ... } }` и добавить:
-+
-+```kotlin
-+signingConfig = signingConfigs.getByName("debug")
-+```
-+
-+Пример:
-+```kotlin
-+buildTypes {
-+    release {
-+        isMinifyEnabled = false
-+        signingConfig = signingConfigs.getByName("debug")  // <-- эта строка
-+        proguardFiles(...)
-+    }
-+}
-+```
-+
-+### 3. Скопировать AAR-библиотеки в app/libs/
-+
-+```bash
-+mkdir -p app/libs
-+
-+# libv2ray.aar (скачать свежий)
-+curl -L "https://github.com/2dust/AndroidLibXrayLite/releases/latest/download/libv2ray.aar" -o app/libs/libv2ray.aar
-+
-+# libhev-socks5-tunnel.aar (уже есть в репозитории, нужно скопировать из другой ветки или создать заново)
-+```
-+
-+### 4. Собрать APK
-+
-+```bash
-+./gradlew clean assembleRelease
-+```
-+
-+APK будут в `app/build/outputs/apk/playstore/release/`
-+
-+### 5. Установить на устройство
-+
-+```bash
-+# Удалить старую версию (если есть конфликт подписей)
-+adb uninstall com.v2ray.ang
-+
-+# Установить новую
-+adb install app/build/outputs/apk/playstore/release/v2rayNG_X.X.X_arm64-v8a.apk
-+```
-+
-+## Создание libhev-socks5-tunnel.aar (если нужно пересоздать)
-+
-+```bash
-+cd /tmp
-+mkdir -p hev-aar/jni/arm64-v8a
-+cp /path/to/libhev-socks5-tunnel.so hev-aar/jni/arm64-v8a/
-+cd hev-aar
-+
-+cat > AndroidManifest.xml << 'EOF'
-+<?xml version="1.0" encoding="utf-8"?>
-+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-+    package="com.hev.tunnel">
-+</manifest>
-+EOF
-+
-+zip -r ../libhev-socks5-tunnel.aar jni/ AndroidManifest.xml
-+```
-+
-+## Известные проблемы
-+
-+### Ошибка: libhev-socks5-tunnel.so not found
-+Решение: убедиться, что `libhev-socks5-tunnel.aar` лежит в `app/libs/`
-+
-+### Ошибка: INSTALL_FAILED_UPDATE_INCOMPATIBLE
-+Решение: удалить старую версию через `adb uninstall com.v2ray.ang`
-+
-+### Ошибка: jar is unsigned
-+Решение: добавить `signingConfig = signingConfigs.getByName("debug")` в build.gradle.kts
 diff --git a/V2rayNG/app/build.gradle.kts b/V2rayNG/app/build.gradle.kts
 index 689c6fdd..3821df1e 100644
 --- a/V2rayNG/app/build.gradle.kts
@@ -613,6 +10,14 @@ index 689c6fdd..3821df1e 100644
              proguardFiles(
                  getDefaultProguardFile("proguard-android-optimize.txt"),
                  "proguard-rules.pro"
+diff --git a/V2rayNG/app/libs/libhev-socks5-tunnel.aar b/V2rayNG/app/libs/libhev-socks5-tunnel.aar
+new file mode 100644
+index 00000000..57301bd8
+Binary files /dev/null and b/V2rayNG/app/libs/libhev-socks5-tunnel.aar differ
+diff --git a/V2rayNG/app/libs/libv2ray.aar b/V2rayNG/app/libs/libv2ray.aar
+new file mode 100644
+index 00000000..9d334374
+Binary files /dev/null and b/V2rayNG/app/libs/libv2ray.aar differ
 diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/AppConfig.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/AppConfig.kt
 index 714c0956..e879e81c 100644
 --- a/V2rayNG/app/src/main/java/com/v2ray/ang/AppConfig.kt
@@ -662,6 +67,68 @@ index 714c0956..e879e81c 100644
  
      /** Notification channel IDs and names. */
      const val RAY_NG_CHANNEL_ID = "RAY_NG_M_CH_ID"
+diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/core/CoreServiceManager.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/core/CoreServiceManager.kt
+index 2076ed02..353db2bf 100644
+--- a/V2rayNG/app/src/main/java/com/v2ray/ang/core/CoreServiceManager.kt
++++ b/V2rayNG/app/src/main/java/com/v2ray/ang/core/CoreServiceManager.kt
+@@ -27,6 +27,7 @@ import com.v2ray.ang.service.CoreProxyOnlyService
+ import com.v2ray.ang.service.CoreRootService
+ import com.v2ray.ang.service.CoreVpnService
+ import com.v2ray.ang.service.DialerNativeService
++import com.v2ray.ang.service.SpeedTestWorkerService
+ import com.v2ray.ang.service.DialerWebviewService
+ import com.v2ray.ang.service.IDialerService
+ import com.v2ray.ang.util.LogUtil
+@@ -386,9 +387,18 @@ object CoreServiceManager {
+             }
+ 
+             val result = if (time >= 0) {
+-                service.getString(R.string.connection_test_available, time)
++                val delayText = service.getString(R.string.connection_test_available, time)
++                val speed = measureCurrentServerSpeed(service)
++                if (speed > 0.0) {
++                    val speedText = service.getString(R.string.connection_test_speed, formatSpeedMbps(speed))
++                    "<font color=\"${colorHex(service, R.color.colorPing)}\">$delayText</font>" +
++                        "<br><font color=\"${colorHex(service, R.color.colorSpeedTest)}\">$speedText</font>"
++                } else {
++                    "<font color=\"${colorHex(service, R.color.colorPing)}\">$delayText</font>"
++                }
+             } else {
+-                service.getString(R.string.connection_test_error, errorStr)
++                val errorText = service.getString(R.string.connection_test_error, errorStr)
++                "<font color=\"${colorHex(service, R.color.md_theme_error)}\">$errorText</font>"
+             }
+             MessageUtil.sendMsg2UI(service, AppConfig.MSG_MEASURE_DELAY_SUCCESS, result)
+ 
+@@ -401,6 +411,28 @@ object CoreServiceManager {
+         }
+     }
+ 
++    /**
++     * Measures the download speed of the currently selected server.
++     * @param service The running service.
++     * @return Download speed in Mbps, or 0.0 if the measurement failed.
++     */
++    private suspend fun measureCurrentServerSpeed(service: Service): Double {
++        val guid = MmkvManager.getSelectServer() ?: return 0.0
++        return SpeedTestWorkerService.measureServerSpeed(service, guid)
++    }
++
++    private fun formatSpeedMbps(speed: Double): String {
++        return if (speed >= 10.0) {
++            String.format("%.0f Mbps", speed)
++        } else {
++            String.format("%.1f Mbps", speed)
++        }
++    }
++
++    private fun colorHex(context: Context, resId: Int): String {
++        return String.format("#%06X", 0xFFFFFF and ContextCompat.getColor(context, resId))
++    }
++
+     /**
+      * Gets the current service instance.
+      * @return The current service instance, or null if not available.
 diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/dto/entities/ServerAffiliationInfo.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/dto/entities/ServerAffiliationInfo.kt
 index ce21a3d2..ab84afbd 100644
 --- a/V2rayNG/app/src/main/java/com/v2ray/ang/dto/entities/ServerAffiliationInfo.kt
@@ -946,10 +413,10 @@ index b3d8382b..74076bcb 100644
 +}
 diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/service/SpeedTestWorkerService.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/service/SpeedTestWorkerService.kt
 new file mode 100644
-index 00000000..0d32fe28
+index 00000000..cb50a683
 --- /dev/null
 +++ b/V2rayNG/app/src/main/java/com/v2ray/ang/service/SpeedTestWorkerService.kt
-@@ -0,0 +1,245 @@
+@@ -0,0 +1,256 @@
 +package com.v2ray.ang.service
 +
 +import android.content.Context
@@ -1076,130 +543,162 @@ index 00000000..0d32fe28
 +    }
 +
 +    private suspend fun startDownloadSpeedTest(guid: String): Double {
-+        val configResult = CoreConfigManager.getV2rayConfig4Speedtest(context, guid)
-+        if (!configResult.status) {
-+            return 0.0
-+        }
-+
-+        val port = findFreePort()
-+        val config = addHttpInbound(configResult.content, port) ?: return 0.0
-+        val controller = CoreNativeManager.newCoreController(SpeedTestCoreCallback())
-+        return try {
-+            controller.startLoop(config, 0)
-+            delay(600)
-+            if (!controller.isRunning) {
-+                LogUtil.w(AppConfig.TAG, "Speed test core did not start for $guid")
-+                return 0.0
-+            }
-+            for (url in SettingsManager.getSpeedTestUrls()) {
-+                val speed = downloadViaProxy(port, url)
-+                if (speed > 0.0) {
-+                    return speed
-+                }
-+            }
-+            0.0
-+        } catch (e: Exception) {
-+            LogUtil.e(AppConfig.TAG, "Speed test failed for $guid", e)
-+            0.0
-+        } finally {
-+            try {
-+                controller.stopLoop()
-+            } catch (e: Exception) {
-+                LogUtil.e(AppConfig.TAG, "Failed to stop speed test core", e)
-+            }
-+        }
-+    }
-+
-+    private fun downloadViaProxy(port: Int, url: String): Double {
-+        val timeout = SettingsManager.getSpeedTestTimeoutMillis()
-+        val proxy = Proxy(Proxy.Type.HTTP, InetSocketAddress(AppConfig.LOOPBACK, port))
-+        val conn = (URL(url).openConnection(proxy) as? HttpURLConnection) ?: return 0.0
-+        var totalBytes = 0L
-+        val started = SystemClock.elapsedRealtime()
-+
-+        return try {
-+            conn.connectTimeout = timeout
-+            conn.readTimeout = timeout
-+            conn.instanceFollowRedirects = true
-+            conn.setRequestProperty("Connection", "close")
-+            conn.connect()
-+            val responseCode = conn.responseCode
-+            if (responseCode !in HTTP_SUCCESS_CODES) {
-+                LogUtil.w(AppConfig.TAG, "Speed test URL returned HTTP $responseCode: $url")
-+                return 0.0
-+            }
-+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-+            conn.inputStream.use { input ->
-+                while (job.isActive && input.read(buffer).also { if (it > 0) totalBytes += it } != -1) {
-+                    val elapsed = SystemClock.elapsedRealtime() - started
-+                    if (elapsed >= timeout || totalBytes >= MAX_DOWNLOAD_BYTES) {
-+                        break
-+                    }
-+                }
-+            }
-+            if (totalBytes < MIN_DOWNLOAD_BYTES) {
-+                LogUtil.w(AppConfig.TAG, "Speed test URL returned only $totalBytes bytes: $url")
-+                return 0.0
-+            }
-+            val elapsedSeconds = ((SystemClock.elapsedRealtime() - started).coerceAtLeast(1L)) / 1000.0
-+            (totalBytes * 8.0) / elapsedSeconds / 1_000_000.0
-+        } catch (e: IOException) {
-+            LogUtil.e(AppConfig.TAG, "Speed test download failed for $url", e)
-+            0.0
-+        } catch (e: Exception) {
-+            LogUtil.e(AppConfig.TAG, "Speed test download failed for $url", e)
-+            0.0
-+        } finally {
-+            conn.disconnect()
-+        }
-+    }
-+
-+    private fun addHttpInbound(config: String, port: Int): String? {
-+        val json = JsonUtil.parseString(config) ?: return null
-+        val inbounds = JsonArray()
-+        val inbound = JsonUtil.parseString(
-+            """
-+            {
-+              "tag": "speedtest-http",
-+              "listen": "${AppConfig.LOOPBACK}",
-+              "port": $port,
-+              "protocol": "http",
-+              "settings": {
-+                "timeout": 0,
-+                "userLevel": 8
-+              }
-+            }
-+            """.trimIndent()
-+        ) ?: return null
-+        inbounds.add(inbound)
-+        json.add("inbounds", inbounds)
-+        return JsonUtil.toJsonPretty(json)
-+    }
-+
-+    private fun findFreePort(): Int {
-+        ServerSocket(0).use { socket ->
-+            socket.reuseAddress = true
-+            return socket.localPort
-+        }
-+    }
-+
-+    private class SpeedTestCoreCallback : CoreCallbackHandler {
-+        override fun startup(): Long = 0
-+        override fun shutdown(): Long = 0
-+        override fun onEmitStatus(l: Long, s: String?): Long = 0
++        return measureServerSpeed(context, guid)
 +    }
 +
 +    companion object {
 +        private const val MAX_DOWNLOAD_BYTES = 50L * 1024L * 1024L
 +        private const val MIN_DOWNLOAD_BYTES = 256L * 1024L
 +        private val HTTP_SUCCESS_CODES = HttpURLConnection.HTTP_OK..299
++
++        /**
++         * Measures the download speed for a single server.
++         * Starts a lightweight core instance with an HTTP inbound and downloads
++         * through the local proxy to compute the throughput in Mbps.
++         *
++         * @return Download speed in Mbps, or 0.0 if the test failed.
++         */
++        suspend fun measureServerSpeed(context: Context, guid: String): Double {
++            val configResult = CoreConfigManager.getV2rayConfig4Speedtest(context, guid)
++            if (!configResult.status) {
++                return 0.0
++            }
++
++            val port = findFreePort()
++            val config = addHttpInbound(configResult.content, port) ?: return 0.0
++            val controller = CoreNativeManager.newCoreController(SpeedTestCoreCallback())
++            return try {
++                controller.startLoop(config, 0)
++                delay(600)
++                if (!controller.isRunning) {
++                    LogUtil.w(AppConfig.TAG, "Speed test core did not start for $guid")
++                    return 0.0
++                }
++                for (url in SettingsManager.getSpeedTestUrls()) {
++                    val speed = downloadViaProxy(port, url)
++                    if (speed > 0.0) {
++                        return speed
++                    }
++                }
++                0.0
++            } catch (e: Exception) {
++                LogUtil.e(AppConfig.TAG, "Speed test failed for $guid", e)
++                0.0
++            } finally {
++                try {
++                    controller.stopLoop()
++                } catch (e: Exception) {
++                    LogUtil.e(AppConfig.TAG, "Failed to stop speed test core", e)
++                }
++            }
++        }
++
++        private suspend fun downloadViaProxy(port: Int, url: String): Double {
++            val timeout = SettingsManager.getSpeedTestTimeoutMillis()
++            val proxy = Proxy(Proxy.Type.HTTP, InetSocketAddress(AppConfig.LOOPBACK, port))
++            val conn = (URL(url).openConnection(proxy) as? HttpURLConnection) ?: return 0.0
++            var totalBytes = 0L
++            val started = SystemClock.elapsedRealtime()
++
++            return try {
++                conn.connectTimeout = timeout
++                conn.readTimeout = timeout
++                conn.instanceFollowRedirects = true
++                conn.setRequestProperty("Connection", "close")
++                conn.connect()
++                val responseCode = conn.responseCode
++                if (responseCode !in HTTP_SUCCESS_CODES) {
++                    LogUtil.w(AppConfig.TAG, "Speed test URL returned HTTP $responseCode: $url")
++                    return 0.0
++                }
++                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
++                conn.inputStream.use { input ->
++                    while (currentCoroutineContext().isActive && input.read(buffer).also { if (it > 0) totalBytes += it } != -1) {
++                        val elapsed = SystemClock.elapsedRealtime() - started
++                        if (elapsed >= timeout || totalBytes >= MAX_DOWNLOAD_BYTES) {
++                            break
++                        }
++                    }
++                }
++                if (totalBytes < MIN_DOWNLOAD_BYTES) {
++                    LogUtil.w(AppConfig.TAG, "Speed test URL returned only $totalBytes bytes: $url")
++                    return 0.0
++                }
++                val elapsedSeconds = ((SystemClock.elapsedRealtime() - started).coerceAtLeast(1L)) / 1000.0
++                (totalBytes * 8.0) / elapsedSeconds / 1_000_000.0
++            } catch (e: IOException) {
++                LogUtil.e(AppConfig.TAG, "Speed test download failed for $url", e)
++                0.0
++            } catch (e: Exception) {
++                LogUtil.e(AppConfig.TAG, "Speed test download failed for $url", e)
++                0.0
++            } finally {
++                conn.disconnect()
++            }
++        }
++
++        private fun addHttpInbound(config: String, port: Int): String? {
++            val json = JsonUtil.parseString(config) ?: return null
++            val inbounds = JsonArray()
++            val inbound = JsonUtil.parseString(
++                """
++                {
++                  "tag": "speedtest-http",
++                  "listen": "${AppConfig.LOOPBACK}",
++                  "port": $port,
++                  "protocol": "http",
++                  "settings": {
++                    "timeout": 0,
++                    "userLevel": 8
++                  }
++                }
++                """.trimIndent()
++            ) ?: return null
++            inbounds.add(inbound)
++            json.add("inbounds", inbounds)
++            return JsonUtil.toJsonPretty(json)
++        }
++
++        private fun findFreePort(): Int {
++            ServerSocket(0).use { socket ->
++                socket.reuseAddress = true
++                return socket.localPort
++            }
++        }
++
++        private class SpeedTestCoreCallback : CoreCallbackHandler {
++            override fun startup(): Long = 0
++            override fun shutdown(): Long = 0
++            override fun onEmitStatus(l: Long, s: String?): Long = 0
++        }
 +    }
 +}
 diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/ui/MainActivity.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/ui/MainActivity.kt
-index 90a42e4c..6031156d 100644
+index 90a42e4c..d20a112a 100644
 --- a/V2rayNG/app/src/main/java/com/v2ray/ang/ui/MainActivity.kt
 +++ b/V2rayNG/app/src/main/java/com/v2ray/ang/ui/MainActivity.kt
-@@ -345,6 +345,12 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
+@@ -6,6 +6,7 @@ import android.net.Uri
+ import android.net.VpnService
+ import android.os.Build
+ import android.os.Bundle
++import android.text.Html
+ import android.view.KeyEvent
+ import android.view.Menu
+ import android.view.MenuItem
+@@ -213,7 +214,11 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
+     }
+ 
+     private fun setTestState(content: String?) {
+-        binding.tvTestState.text = content
++        binding.tvTestState.text = if (!content.isNullOrEmpty() && content.contains('<')) {
++            Html.fromHtml(content, Html.FROM_HTML_MODE_LEGACY)
++        } else {
++            content
++        }
+     }
+ 
+     private fun applyRunningState(isLoading: Boolean, isRunning: Boolean) {
+@@ -345,6 +350,12 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
              true
          }
  
@@ -1212,7 +711,7 @@ index 90a42e4c..6031156d 100644
          R.id.service_restart -> {
              restartV2Ray()
              true
-@@ -693,4 +699,4 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
+@@ -693,4 +704,4 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
          tabMediator?.detach()
          super.onDestroy()
      }
@@ -1389,6 +888,19 @@ index 0eff1f0f..72f6ce5a 100644
                  AppConfig.MSG_MEASURE_CONFIG_NOTIFY -> {
                      val content = intent.getStringExtra("content")
                      updateTestResultAction.value =
+diff --git a/V2rayNG/app/src/main/res/layout/activity_main.xml b/V2rayNG/app/src/main/res/layout/activity_main.xml
+index 0c08851f..9c39529a 100644
+--- a/V2rayNG/app/src/main/res/layout/activity_main.xml
++++ b/V2rayNG/app/src/main/res/layout/activity_main.xml
+@@ -81,7 +81,7 @@
+                             android:layout_width="wrap_content"
+                             android:layout_height="match_parent"
+                             android:gravity="start|center"
+-                            android:maxLines="2"
++                            android:maxLines="3"
+                             android:minLines="1"
+                             android:paddingStart="@dimen/padding_spacing_dp16"
+                             android:text="@string/connection_test_pending"
 diff --git a/V2rayNG/app/src/main/res/layout/item_recycler_main.xml b/V2rayNG/app/src/main/res/layout/item_recycler_main.xml
 index b0760742..0c2181d4 100644
 --- a/V2rayNG/app/src/main/res/layout/item_recycler_main.xml
@@ -1434,7 +946,7 @@ index cd1a53df..0a2d8f76 100644
 \ No newline at end of file
 +</menu>
 diff --git a/V2rayNG/app/src/main/res/values-ru/strings.xml b/V2rayNG/app/src/main/res/values-ru/strings.xml
-index 7890ea8e..9782e43f 100644
+index 7890ea8e..eae4be66 100644
 --- a/V2rayNG/app/src/main/res/values-ru/strings.xml
 +++ b/V2rayNG/app/src/main/res/values-ru/strings.xml
 @@ -220,7 +220,11 @@
@@ -1458,6 +970,18 @@ index 7890ea8e..9782e43f 100644
      <string name="title_user_asset_setting">Файлы ресурсов</string>
      <string name="title_sort_by_test_results">Сортировать по результатам теста</string>
      <string name="title_filter_config">Фильтр профилей</string>
+@@ -364,8 +369,9 @@
+     <string name="connection_test_pending">Проверить соединение</string>
+     <string name="connection_test_testing">Проверка…</string>
+     <string name="connection_test_testing_count">Проверка профилей (%d)</string>
+-    <string name="connection_test_available">Успешно: соединение заняло %d мс</string>
+-    <string name="connection_test_error">Сбой проверки интернет-соединения: %s</string>
++    <string name="connection_test_available">Успешно: %d мс</string>
++    <string name="connection_test_error">Сбой соединения: %s</string>
++    <string name="connection_test_speed">Скорость: %s</string>
+     <string name="connection_test_fail">Интернет недоступен</string>
+     <string name="connection_test_error_status_code">Код ошибки: #%d</string>
+     <string name="connection_connected">Соединено, нажмите для проверки</string>
 diff --git a/V2rayNG/app/src/main/res/values/colors.xml b/V2rayNG/app/src/main/res/values/colors.xml
 index 4054d13e..ee92d5ad 100644
 --- a/V2rayNG/app/src/main/res/values/colors.xml
@@ -1471,7 +995,7 @@ index 4054d13e..ee92d5ad 100644
      <color name="colorWhite">#FFFFFF</color>
      <color name="color_fab_active">#f97910</color>
 diff --git a/V2rayNG/app/src/main/res/values/strings.xml b/V2rayNG/app/src/main/res/values/strings.xml
-index 419e5b6a..6feb4ed1 100644
+index 419e5b6a..f30e4415 100644
 --- a/V2rayNG/app/src/main/res/values/strings.xml
 +++ b/V2rayNG/app/src/main/res/values/strings.xml
 @@ -223,6 +223,10 @@
@@ -1493,6 +1017,18 @@ index 419e5b6a..6feb4ed1 100644
      <string name="title_user_asset_setting">Asset files</string>
      <string name="title_sort_by_test_results">Sorting by test results</string>
      <string name="title_filter_config">Filter config</string>
+@@ -367,8 +372,9 @@
+     <string name="connection_test_pending">Check Connectivity</string>
+     <string name="connection_test_testing">Testing…</string>
+     <string name="connection_test_testing_count">Testing %d configs…</string>
+-    <string name="connection_test_available">Success: Connection took %dms</string>
+-    <string name="connection_test_error">Fail to detect internet connection: %s</string>
++    <string name="connection_test_available">Success: %dms</string>
++    <string name="connection_test_error">Connection failed: %s</string>
++    <string name="connection_test_speed">Speed: %s</string>
+     <string name="connection_test_fail">Internet Unavailable</string>
+     <string name="connection_test_error_status_code">Error code: #%d</string>
+     <string name="connection_connected">Connected, tap to check connection</string>
 diff --git a/V2rayNG/app/src/main/res/xml/pref_settings.xml b/V2rayNG/app/src/main/res/xml/pref_settings.xml
 index 78114e3c..cd16f0eb 100644
 --- a/V2rayNG/app/src/main/res/xml/pref_settings.xml
@@ -1528,67 +1064,3 @@ index 78114e3c..cd16f0eb 100644
 -</PreferenceScreen>
 \ No newline at end of file
 +</PreferenceScreen>
-diff --git a/V2rayNG/gradle/gradle-daemon-jvm.properties b/V2rayNG/gradle/gradle-daemon-jvm.properties
-new file mode 100644
-index 00000000..6c1139ec
---- /dev/null
-+++ b/V2rayNG/gradle/gradle-daemon-jvm.properties
-@@ -0,0 +1,12 @@
-+#This file is generated by updateDaemonJvm
-+toolchainUrl.FREE_BSD.AARCH64=https\://api.foojay.io/disco/v3.0/ids/ec7520a1e057cd116f9544c42142a16b/redirect
-+toolchainUrl.FREE_BSD.X86_64=https\://api.foojay.io/disco/v3.0/ids/4c4f879899012ff0a8b2e2117df03b0e/redirect
-+toolchainUrl.LINUX.AARCH64=https\://api.foojay.io/disco/v3.0/ids/ec7520a1e057cd116f9544c42142a16b/redirect
-+toolchainUrl.LINUX.X86_64=https\://api.foojay.io/disco/v3.0/ids/4c4f879899012ff0a8b2e2117df03b0e/redirect
-+toolchainUrl.MAC_OS.AARCH64=https\://api.foojay.io/disco/v3.0/ids/73bcfb608d1fde9fb62e462f834a3299/redirect
-+toolchainUrl.MAC_OS.X86_64=https\://api.foojay.io/disco/v3.0/ids/846ee0d876d26a26f37aa1ce8de73224/redirect
-+toolchainUrl.UNIX.AARCH64=https\://api.foojay.io/disco/v3.0/ids/ec7520a1e057cd116f9544c42142a16b/redirect
-+toolchainUrl.UNIX.X86_64=https\://api.foojay.io/disco/v3.0/ids/4c4f879899012ff0a8b2e2117df03b0e/redirect
-+toolchainUrl.WINDOWS.AARCH64=https\://api.foojay.io/disco/v3.0/ids/9482ddec596298c84656d31d16652665/redirect
-+toolchainUrl.WINDOWS.X86_64=https\://api.foojay.io/disco/v3.0/ids/39701d92e1756bb2f141eb67cd4c660e/redirect
-+toolchainVersion=21
-diff --git a/apply_speed_test_patch.sh b/apply_speed_test_patch.sh
-new file mode 100755
-index 00000000..af8fd8f8
---- /dev/null
-+++ b/apply_speed_test_patch.sh
-@@ -0,0 +1,25 @@
-+#!/usr/bin/env bash
-+set -euo pipefail
-+
-+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-+PATCH_FILE="$SCRIPT_DIR/patches/speed-test.patch"
-+
-+if [[ ! -f "$PATCH_FILE" ]]; then
-+  echo "Patch file not found: $PATCH_FILE" >&2
-+  exit 1
-+fi
-+
-+cd "$SCRIPT_DIR"
-+
-+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-+  echo "This script must be run inside the v2rayNG git checkout." >&2
-+  exit 1
-+fi
-+
-+git apply --check "$PATCH_FILE" 2>/dev/null || {
-+  echo "Patch does not apply cleanly; trying a 3-way apply..." >&2
-+}
-+
-+git apply --3way "$PATCH_FILE"
-+
-+echo "Speed test patch applied."
-diff --git a/v2rayNG.code-workspace b/v2rayNG.code-workspace
-new file mode 100644
-index 00000000..876a1499
---- /dev/null
-+++ b/v2rayNG.code-workspace
-@@ -0,0 +1,8 @@
-+{
-+	"folders": [
-+		{
-+			"path": "."
-+		}
-+	],
-+	"settings": {}
-+}
-\ No newline at end of file

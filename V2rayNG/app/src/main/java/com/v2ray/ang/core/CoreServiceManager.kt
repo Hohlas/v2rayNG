@@ -27,6 +27,7 @@ import com.v2ray.ang.service.CoreProxyOnlyService
 import com.v2ray.ang.service.CoreRootService
 import com.v2ray.ang.service.CoreVpnService
 import com.v2ray.ang.service.DialerNativeService
+import com.v2ray.ang.service.SpeedTestWorkerService
 import com.v2ray.ang.service.DialerWebviewService
 import com.v2ray.ang.service.IDialerService
 import com.v2ray.ang.util.LogUtil
@@ -386,9 +387,18 @@ object CoreServiceManager {
             }
 
             val result = if (time >= 0) {
-                service.getString(R.string.connection_test_available, time)
+                val delayText = service.getString(R.string.connection_test_available, time)
+                val speed = measureCurrentServerSpeed(service)
+                if (speed > 0.0) {
+                    val speedText = service.getString(R.string.connection_test_speed, formatSpeedMbps(speed))
+                    "<font color=\"${colorHex(service, R.color.colorPing)}\">$delayText</font>" +
+                        "<br><font color=\"${colorHex(service, R.color.colorSpeedTest)}\">$speedText</font>"
+                } else {
+                    "<font color=\"${colorHex(service, R.color.colorPing)}\">$delayText</font>"
+                }
             } else {
-                service.getString(R.string.connection_test_error, errorStr)
+                val errorText = service.getString(R.string.connection_test_error, errorStr)
+                "<font color=\"${colorHex(service, R.color.md_theme_error)}\">$errorText</font>"
             }
             MessageUtil.sendMsg2UI(service, AppConfig.MSG_MEASURE_DELAY_SUCCESS, result)
 
@@ -399,6 +409,28 @@ object CoreServiceManager {
                 }
             }
         }
+    }
+
+    /**
+     * Measures the download speed of the currently selected server.
+     * @param service The running service.
+     * @return Download speed in Mbps, or 0.0 if the measurement failed.
+     */
+    private suspend fun measureCurrentServerSpeed(service: Service): Double {
+        val guid = MmkvManager.getSelectServer() ?: return 0.0
+        return SpeedTestWorkerService.measureServerSpeed(service, guid)
+    }
+
+    private fun formatSpeedMbps(speed: Double): String {
+        return if (speed >= 10.0) {
+            String.format("%.0f Mbps", speed)
+        } else {
+            String.format("%.1f Mbps", speed)
+        }
+    }
+
+    private fun colorHex(context: Context, resId: Int): String {
+        return String.format("#%06X", 0xFFFFFF and ContextCompat.getColor(context, resId))
     }
 
     /**

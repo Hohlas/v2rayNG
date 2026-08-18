@@ -369,8 +369,9 @@
     <string name="connection_test_pending">Проверить соединение</string>
     <string name="connection_test_testing">Проверка…</string>
     <string name="connection_test_testing_count">Проверка профилей (%d)</string>
-    <string name="connection_test_available">Успешно: соединение заняло %d мс</string>
-    <string name="connection_test_error">Сбой проверки интернет-соединения: %s</string>
+    <string name="connection_test_available">Успешно: %d мс</string>
+    <string name="connection_test_error">Сбой соединения: %s</string>
+    <string name="connection_test_speed">Скорость: %s</string>
     <string name="connection_test_fail">Интернет недоступен</string>
     <string name="connection_test_error_status_code">Код ошибки: #%d</string>
     <string name="connection_connected">Соединено, нажмите для проверки</string>

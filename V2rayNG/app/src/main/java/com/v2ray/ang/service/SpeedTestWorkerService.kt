@@ -124,122 +124,133 @@ class SpeedTestWorkerService(
     }
 
     private suspend fun startDownloadSpeedTest(guid: String): Double {
-        val configResult = CoreConfigManager.getV2rayConfig4Speedtest(context, guid)
-        if (!configResult.status) {
-            return 0.0
-        }
-
-        val port = findFreePort()
-        val config = addHttpInbound(configResult.content, port) ?: return 0.0
-        val controller = CoreNativeManager.newCoreController(SpeedTestCoreCallback())
-        return try {
-            controller.startLoop(config, 0)
-            delay(600)
-            if (!controller.isRunning) {
-                LogUtil.w(AppConfig.TAG, "Speed test core did not start for $guid")
-                return 0.0
-            }
-            for (url in SettingsManager.getSpeedTestUrls()) {
-                val speed = downloadViaProxy(port, url)
-                if (speed > 0.0) {
-                    return speed
-                }
-            }
-            0.0
-        } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Speed test failed for $guid", e)
-            0.0
-        } finally {
-            try {
-                controller.stopLoop()
-            } catch (e: Exception) {
-                LogUtil.e(AppConfig.TAG, "Failed to stop speed test core", e)
-            }
-        }
-    }
-
-    private fun downloadViaProxy(port: Int, url: String): Double {
-        val timeout = SettingsManager.getSpeedTestTimeoutMillis()
-        val proxy = Proxy(Proxy.Type.HTTP, InetSocketAddress(AppConfig.LOOPBACK, port))
-        val conn = (URL(url).openConnection(proxy) as? HttpURLConnection) ?: return 0.0
-        var totalBytes = 0L
-        val started = SystemClock.elapsedRealtime()
-
-        return try {
-            conn.connectTimeout = timeout
-            conn.readTimeout = timeout
-            conn.instanceFollowRedirects = true
-            conn.setRequestProperty("Connection", "close")
-            conn.connect()
-            val responseCode = conn.responseCode
-            if (responseCode !in HTTP_SUCCESS_CODES) {
-                LogUtil.w(AppConfig.TAG, "Speed test URL returned HTTP $responseCode: $url")
-                return 0.0
-            }
-            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-            conn.inputStream.use { input ->
-                while (job.isActive && input.read(buffer).also { if (it > 0) totalBytes += it } != -1) {
-                    val elapsed = SystemClock.elapsedRealtime() - started
-                    if (elapsed >= timeout || totalBytes >= MAX_DOWNLOAD_BYTES) {
-                        break
-                    }
-                }
-            }
-            if (totalBytes < MIN_DOWNLOAD_BYTES) {
-                LogUtil.w(AppConfig.TAG, "Speed test URL returned only $totalBytes bytes: $url")
-                return 0.0
-            }
-            val elapsedSeconds = ((SystemClock.elapsedRealtime() - started).coerceAtLeast(1L)) / 1000.0
-            (totalBytes * 8.0) / elapsedSeconds / 1_000_000.0
-        } catch (e: IOException) {
-            LogUtil.e(AppConfig.TAG, "Speed test download failed for $url", e)
-            0.0
-        } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Speed test download failed for $url", e)
-            0.0
-        } finally {
-            conn.disconnect()
-        }
-    }
-
-    private fun addHttpInbound(config: String, port: Int): String? {
-        val json = JsonUtil.parseString(config) ?: return null
-        val inbounds = JsonArray()
-        val inbound = JsonUtil.parseString(
-            """
-            {
-              "tag": "speedtest-http",
-              "listen": "${AppConfig.LOOPBACK}",
-              "port": $port,
-              "protocol": "http",
-              "settings": {
-                "timeout": 0,
-                "userLevel": 8
-              }
-            }
-            """.trimIndent()
-        ) ?: return null
-        inbounds.add(inbound)
-        json.add("inbounds", inbounds)
-        return JsonUtil.toJsonPretty(json)
-    }
-
-    private fun findFreePort(): Int {
-        ServerSocket(0).use { socket ->
-            socket.reuseAddress = true
-            return socket.localPort
-        }
-    }
-
-    private class SpeedTestCoreCallback : CoreCallbackHandler {
-        override fun startup(): Long = 0
-        override fun shutdown(): Long = 0
-        override fun onEmitStatus(l: Long, s: String?): Long = 0
+        return measureServerSpeed(context, guid)
     }
 
     companion object {
         private const val MAX_DOWNLOAD_BYTES = 50L * 1024L * 1024L
         private const val MIN_DOWNLOAD_BYTES = 256L * 1024L
         private val HTTP_SUCCESS_CODES = HttpURLConnection.HTTP_OK..299
+
+        /**
+         * Measures the download speed for a single server.
+         * Starts a lightweight core instance with an HTTP inbound and downloads
+         * through the local proxy to compute the throughput in Mbps.
+         *
+         * @return Download speed in Mbps, or 0.0 if the test failed.
+         */
+        suspend fun measureServerSpeed(context: Context, guid: String): Double {
+            val configResult = CoreConfigManager.getV2rayConfig4Speedtest(context, guid)
+            if (!configResult.status) {
+                return 0.0
+            }
+
+            val port = findFreePort()
+            val config = addHttpInbound(configResult.content, port) ?: return 0.0
+            val controller = CoreNativeManager.newCoreController(SpeedTestCoreCallback())
+            return try {
+                controller.startLoop(config, 0)
+                delay(600)
+                if (!controller.isRunning) {
+                    LogUtil.w(AppConfig.TAG, "Speed test core did not start for $guid")
+                    return 0.0
+                }
+                for (url in SettingsManager.getSpeedTestUrls()) {
+                    val speed = downloadViaProxy(port, url)
+                    if (speed > 0.0) {
+                        return speed
+                    }
+                }
+                0.0
+            } catch (e: Exception) {
+                LogUtil.e(AppConfig.TAG, "Speed test failed for $guid", e)
+                0.0
+            } finally {
+                try {
+                    controller.stopLoop()
+                } catch (e: Exception) {
+                    LogUtil.e(AppConfig.TAG, "Failed to stop speed test core", e)
+                }
+            }
+        }
+
+        private suspend fun downloadViaProxy(port: Int, url: String): Double {
+            val timeout = SettingsManager.getSpeedTestTimeoutMillis()
+            val proxy = Proxy(Proxy.Type.HTTP, InetSocketAddress(AppConfig.LOOPBACK, port))
+            val conn = (URL(url).openConnection(proxy) as? HttpURLConnection) ?: return 0.0
+            var totalBytes = 0L
+            val started = SystemClock.elapsedRealtime()
+
+            return try {
+                conn.connectTimeout = timeout
+                conn.readTimeout = timeout
+                conn.instanceFollowRedirects = true
+                conn.setRequestProperty("Connection", "close")
+                conn.connect()
+                val responseCode = conn.responseCode
+                if (responseCode !in HTTP_SUCCESS_CODES) {
+                    LogUtil.w(AppConfig.TAG, "Speed test URL returned HTTP $responseCode: $url")
+                    return 0.0
+                }
+                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                conn.inputStream.use { input ->
+                    while (currentCoroutineContext().isActive && input.read(buffer).also { if (it > 0) totalBytes += it } != -1) {
+                        val elapsed = SystemClock.elapsedRealtime() - started
+                        if (elapsed >= timeout || totalBytes >= MAX_DOWNLOAD_BYTES) {
+                            break
+                        }
+                    }
+                }
+                if (totalBytes < MIN_DOWNLOAD_BYTES) {
+                    LogUtil.w(AppConfig.TAG, "Speed test URL returned only $totalBytes bytes: $url")
+                    return 0.0
+                }
+                val elapsedSeconds = ((SystemClock.elapsedRealtime() - started).coerceAtLeast(1L)) / 1000.0
+                (totalBytes * 8.0) / elapsedSeconds / 1_000_000.0
+            } catch (e: IOException) {
+                LogUtil.e(AppConfig.TAG, "Speed test download failed for $url", e)
+                0.0
+            } catch (e: Exception) {
+                LogUtil.e(AppConfig.TAG, "Speed test download failed for $url", e)
+                0.0
+            } finally {
+                conn.disconnect()
+            }
+        }
+
+        private fun addHttpInbound(config: String, port: Int): String? {
+            val json = JsonUtil.parseString(config) ?: return null
+            val inbounds = JsonArray()
+            val inbound = JsonUtil.parseString(
+                """
+                {
+                  "tag": "speedtest-http",
+                  "listen": "${AppConfig.LOOPBACK}",
+                  "port": $port,
+                  "protocol": "http",
+                  "settings": {
+                    "timeout": 0,
+                    "userLevel": 8
+                  }
+                }
+                """.trimIndent()
+            ) ?: return null
+            inbounds.add(inbound)
+            json.add("inbounds", inbounds)
+            return JsonUtil.toJsonPretty(json)
+        }
+
+        private fun findFreePort(): Int {
+            ServerSocket(0).use { socket ->
+                socket.reuseAddress = true
+                return socket.localPort
+            }
+        }
+
+        private class SpeedTestCoreCallback : CoreCallbackHandler {
+            override fun startup(): Long = 0
+            override fun shutdown(): Long = 0
+            override fun onEmitStatus(l: Long, s: String?): Long = 0
+        }
     }
 }
