@@ -42,10 +42,45 @@ object SettingsManager {
 
     fun initApp(context: Context) {
         ensureDefaultSettings()
-        //ensureDefaultSubscription()
+        ensureDefaultSubscriptions()
         initRoutingRulesets(context)
         migrateServerListToSubscriptions()
         migrateHysteria2PinSHA256()
+    }
+
+    /**
+     * Adds the default subscriptions on a fresh install.
+     *
+     * Runs at most once (guarded by [AppConfig.PREF_DEFAULT_SUBSCRIPTION_SEEDED]).
+     * Skips installs that already contain user subscriptions, so updating the app
+     * over an existing setup never duplicates groups.
+     */
+    private fun ensureDefaultSubscriptions() {
+        if (MmkvManager.decodeSettingsBool(AppConfig.PREF_DEFAULT_SUBSCRIPTION_SEEDED, false)) {
+            return
+        }
+        MmkvManager.encodeSettings(AppConfig.PREF_DEFAULT_SUBSCRIPTION_SEEDED, true)
+
+        val hasExistingSubscriptions = MmkvManager.decodeSubscriptions().any { it.subscription.url.isNotBlank() }
+        if (hasExistingSubscriptions) {
+            return
+        }
+
+        AppConfig.DEFAULT_SUBSCRIPTION_URLS.forEach { (url, remarks) ->
+            encodeSubscription(
+                Utils.getUuid(),
+                SubscriptionItem(remarks = remarks, url = url, enabled = true)
+            )
+        }
+
+        // Populate the new groups in the background on first launch.
+        Thread {
+            try {
+                AngConfigManager.updateConfigViaSubAll()
+            } catch (e: Exception) {
+                LogUtil.e(AppConfig.TAG, "Failed to seed default subscriptions", e)
+            }
+        }.start()
     }
 
     /**

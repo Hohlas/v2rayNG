@@ -84,6 +84,7 @@ object AppConfig {
     const val PREF_AUTO_REMOVE_INVALID_AFTER_TEST = "pref_auto_remove_invalid_after_test"
     const val PREF_AUTO_SORT_AFTER_TEST = "pref_auto_sort_after_test"
     const val PREF_REAL_PING_CONCURRENCY = "pref_real_ping_concurrency"
+    const val PREF_DEFAULT_SUBSCRIPTION_SEEDED = "pref_default_subscription_seeded"
 
     /** Cache keys. */
     const val CACHE_SUBSCRIPTION_ID = "cache_subscription_id"
@@ -134,6 +135,14 @@ object AppConfig {
     const val SPEED_TEST_URL = "https://speed.cloudflare.com/__down?bytes=10000000,https://cachefly.cachefly.net/50mb.test"
     const val SPEED_TEST_TIMEOUT = "15"
     const val SPEED_TEST_CONCURRENCY = "4"
+
+    /** Subscriptions added automatically on a fresh install (URL to remark). */
+    val DEFAULT_SUBSCRIPTION_URLS = listOf(
+        "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile.txt" to "Vless-Reality-White-Lists-Rus-Mobile",
+        "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/WHITE-CIDR-RU-all.txt" to "WHITE-CIDR-RU-all",
+        "https://raw.githubusercontent.com/AvenCores/goida-vpn-configs/refs/heads/main/githubmirror/26.txt" to "goida 26",
+        "https://hub.mos.ru/zieng2/wl/raw/main/list_universal.txt" to "list_universal"
+    )
 
     //    const val IP_API_URL = "https://speed.cloudflare.com/meta"
     const val IP_API_URL = "https://api.ip.sb/geoip"
