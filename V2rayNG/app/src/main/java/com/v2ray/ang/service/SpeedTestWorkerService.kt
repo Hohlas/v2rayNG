@@ -155,17 +155,13 @@ class SpeedTestWorkerService(
                     LogUtil.w(AppConfig.TAG, "Speed test core did not start for $guid")
                     return 0.0
                 }
-                // Retry the download phase once so a transient network hiccup
-                // does not report a working server as having no speed.
-                repeat(2) {
-                    for (url in SettingsManager.getSpeedTestUrls()) {
-                        val speed = downloadViaProxy(port, url)
-                        if (speed > 0.0) {
-                            return speed
-                        }
+                for (url in SettingsManager.getSpeedTestUrls()) {
+                    val speed = downloadViaProxy(port, url)
+                    if (speed > 0.0) {
+                        return speed
                     }
                 }
-                LogUtil.w(AppConfig.TAG, "Speed test produced no speed for $guid after retries")
+                LogUtil.w(AppConfig.TAG, "Speed test produced no speed for $guid")
                 0.0
             } catch (e: Exception) {
                 LogUtil.e(AppConfig.TAG, "Speed test failed for $guid", e)
