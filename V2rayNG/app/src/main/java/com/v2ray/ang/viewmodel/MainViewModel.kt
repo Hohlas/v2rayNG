@@ -429,6 +429,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun hasAnySpeedResult(): Boolean {
+        val keys = if (subscriptionId.isEmpty()) {
+            MmkvManager.decodeAllServerList()
+        } else {
+            MmkvManager.decodeServerList(subscriptionId)
+        }
+        return keys.any { (MmkvManager.decodeServerAffiliationInfo(it)?.testSpeedMbps ?: 0.0) > 0.0 }
+    }
+
+    fun sortBySpeedWithFallback() {
+        if (hasAnySpeedResult()) {
+            sortBySpeedTestResults()
+        } else {
+            sortByTestResults()
+        }
+    }
+
     private fun sortBySpeedTestResultsForSub(subId: String) {
         data class ServerSpeed(val guid: String, val speedMbps: Double, val originalIndex: Int)
 
@@ -450,6 +467,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * for the current subscription scope (or all subscriptions if none is selected).
      * Servers with a positive speed are preferred, then higher speed wins,
      * keeping the original list order as a tiebreaker.
+     * Falls back to lowest delay when no speed was measured.
      *
      * @return The fastest server GUID, or null if there are no servers.
      */
@@ -466,6 +484,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val ranked = keys.mapIndexed { index, guid ->
             val speed = MmkvManager.decodeServerAffiliationInfo(guid)?.testSpeedMbps ?: 0.0
             Triple(guid, speed, index)
+        }
+        val hasSpeed = ranked.any { it.second > 0.0 }
+        if (!hasSpeed) {
+            // fallback to delay: smallest positive delay wins
+            return keys.minByOrNull { guid ->
+                val delay = MmkvManager.decodeServerAffiliationInfo(guid)?.testDelayMillis ?: 0L
+                if (delay <= 0L) Long.MAX_VALUE else delay
+            }
         }
         return ranked.maxWith(
             compareBy<Triple<String, Double, Int>> { if (it.second > 0.0) 1 else 0 }
@@ -522,13 +548,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             runSpeedTestAndWait(app, guids)
         }
 
-        // 3. Sort by speed test results
+        // 3. Sort by speed test results, fallback to delay if no speed measured
         autoActionStatus.value = AutoActionStatus(
             running = true,
             message = app.getString(R.string.auto_action_sorting)
         )
         withContext(Dispatchers.IO) {
-            sortBySpeedTestResults()
+            sortBySpeedWithFallback()
         }
         reloadServerList()
 
@@ -646,7 +672,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             if (MmkvManager.decodeSettingsBool(AppConfig.PREF_AUTO_SORT_AFTER_TEST)) {
                 if (sortBySpeed) {
-                    sortBySpeedTestResults()
+                    sortBySpeedWithFallback()
                 } else {
                     sortByTestResults()
                 }

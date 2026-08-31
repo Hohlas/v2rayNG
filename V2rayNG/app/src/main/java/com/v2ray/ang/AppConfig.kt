@@ -131,7 +131,7 @@ object AppConfig {
     const val APP_PROMOTION_URL = "aHR0cHM6Ly85LjIzNDQ1Ni54eXovYWJjLmh0bWw="
     const val TG_CHANNEL_URL = "https://t.me/github_2dust"
     const val DELAY_TEST_URL = "https://cp.cloudflare.com/generate_204"
-    const val SPEED_TEST_URL = "https://speed.cloudflare.com/__down?bytes=100000000"
+    const val SPEED_TEST_URL = "https://speed.cloudflare.com/__down?bytes=10000000"
     const val SPEED_TEST_TIMEOUT = "15"
     const val SPEED_TEST_CONCURRENCY = "4"
 
