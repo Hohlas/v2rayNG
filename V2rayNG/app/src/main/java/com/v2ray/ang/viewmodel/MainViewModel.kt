@@ -613,8 +613,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 AppConfig.MSG_MEASURE_CONFIG_NOTIFY -> {
                     val content = intent.getStringExtra("content")
-                    updateTestResultAction.value =
-                        getApplication<AngApplication>().getString(R.string.connection_runing_task_left, content)
+                    updateTestResultAction.value = content
                 }
 
                 AppConfig.MSG_MEASURE_CONFIG_FINISH -> {

@@ -65,7 +65,7 @@ class SpeedTestWorkerService(
                 } finally {
                     val count = totalDelayCount.decrementAndGet()
                     val left = runningDelayCount.decrementAndGet()
-                    onProgress("$left / $count")
+                    onProgress("Ping: $left / $count")
                 }
             }
         }
@@ -100,7 +100,7 @@ class SpeedTestWorkerService(
                     val speed = startDownloadSpeedTest(guid)
                     onSpeedResult(guid, speed)
                     val done = doneCount.incrementAndGet()
-                    onProgress("$done / ${speedGuids.size}")
+                    onProgress("Speed: $done / ${speedGuids.size}")
                 }
             }
         }

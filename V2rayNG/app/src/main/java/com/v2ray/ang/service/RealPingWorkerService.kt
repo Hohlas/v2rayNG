@@ -50,7 +50,7 @@ class RealPingWorkerService(
                 } finally {
                     val count = totalCount.decrementAndGet()
                     val left = runningCount.decrementAndGet()
-                    onEvent(RealPingEvent.Progress("$left / $count"))
+                    onEvent(RealPingEvent.Progress("Ping: $left / $count"))
                 }
             }
         }

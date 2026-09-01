@@ -117,7 +117,7 @@ class CoreTestService : Service() {
                 NotificationHelper.updateNotification(
                     channelType = NotificationChannelType.CORE_TEST,
                     context = this,
-                    content = getString(R.string.connection_runing_task_left, event.text)
+                    content = event.text
                 )
                 MessageUtil.sendMsg2UI(this, AppConfig.MSG_MEASURE_CONFIG_NOTIFY, event.text)
             }
@@ -171,7 +171,7 @@ class CoreTestService : Service() {
                     NotificationHelper.updateNotification(
                         channelType = NotificationChannelType.CORE_TEST,
                         context = this,
-                        content = getString(R.string.connection_runing_task_left, text)
+                        content = text
                     )
                     MessageUtil.sendMsg2UI(this, AppConfig.MSG_MEASURE_CONFIG_NOTIFY, text)
                 },
