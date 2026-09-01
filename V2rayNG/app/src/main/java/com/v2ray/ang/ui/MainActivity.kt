@@ -123,6 +123,12 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
         mainViewModel.isRunning.observe(this) { isRunning ->
             applyRunningState(false, isRunning)
         }
+        mainViewModel.autoConnectAction.observe(this) { guid ->
+            if (!guid.isNullOrEmpty()) {
+                setTestState(getString(R.string.auto_action_connecting))
+                connectToFastestServer(guid)
+            }
+        }
         mainViewModel.startListenBroadcast()
         mainViewModel.initAssets(assets)
     }
@@ -193,6 +199,7 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
 
     private fun handleAutoAction() {
         setTestState(getString(R.string.auto_action_updating_subscription))
+        mainViewModel.setPendingAutoConnect(true)
         lifecycleScope.launch(Dispatchers.IO) {
             mainViewModel.updateConfigViaSubAll()
             withContext(Dispatchers.Main) {

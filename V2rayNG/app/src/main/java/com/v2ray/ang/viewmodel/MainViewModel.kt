@@ -44,9 +44,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val isRunning by lazy { MutableLiveData<Boolean>() }
     val updateListAction by lazy { MutableLiveData<Int>() }
     val updateTestResultAction by lazy { MutableLiveData<String>() }
+    val autoConnectAction by lazy { MutableLiveData<String>() }
 
     private val tcpingTestScope by lazy { CoroutineScope(Dispatchers.IO) }
     private var isDownloadSpeedTestRunning = false
+    private var pendingAutoConnect = false
+
+    fun setPendingAutoConnect(pending: Boolean) {
+        pendingAutoConnect = pending
+    }
 
     /**
      * Refer to the official documentation for [registerReceiver](https://developer.android.com/reference/androidx/core/content/ContextCompat#registerReceiver(android.content.Context,android.content.BroadcastReceiver,android.content.IntentFilter,int):
@@ -216,6 +222,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch(Dispatchers.Default) {
             if (serversCache.isEmpty()) {
+                isDownloadSpeedTestRunning = false
+                if (pendingAutoConnect) {
+                    onTestsCancelled()
+                }
                 return@launch
             }
             MessageUtil.sendMsg2TestService(
@@ -547,6 +557,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             val sortBySpeed = isDownloadSpeedTestRunning
             isDownloadSpeedTestRunning = false
+            val shouldAutoConnect = pendingAutoConnect
+            pendingAutoConnect = false
 
             if (MmkvManager.decodeSettingsBool(AppConfig.PREF_AUTO_SORT_AFTER_TEST)) {
                 if (sortBySpeed) {
@@ -556,10 +568,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
 
+            var fastestGuid: String? = null
+            if (shouldAutoConnect) {
+                fastestGuid = getFastestServerGuid()
+                if (!fastestGuid.isNullOrEmpty()) {
+                    MmkvManager.setSelectServer(fastestGuid)
+                }
+            }
+
             withContext(Dispatchers.Main) {
                 reloadServerList()
+                if (shouldAutoConnect && !fastestGuid.isNullOrEmpty()) {
+                    autoConnectAction.value = fastestGuid
+                }
             }
         }
+    }
+
+    fun onTestsCancelled() {
+        isDownloadSpeedTestRunning = false
+        pendingAutoConnect = false
     }
 
     private val mMsgReceiver = object : BroadcastReceiver() {
@@ -620,6 +648,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val content = intent.getStringExtra("content")
                     if (content == "0") {
                         onTestsFinished()
+                    } else {
+                        onTestsCancelled()
                     }
                 }
             }
