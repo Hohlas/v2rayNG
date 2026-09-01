@@ -127,6 +127,7 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
             if (!guid.isNullOrEmpty()) {
                 setTestState(getString(R.string.auto_action_connecting))
                 connectToFastestServer(guid)
+                mainViewModel.consumeAutoConnect()
             }
         }
         mainViewModel.startListenBroadcast()
@@ -198,6 +199,7 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
     }
 
     private fun handleAutoAction() {
+        if (mainViewModel.isPendingAutoConnect()) return
         setTestState(getString(R.string.auto_action_updating_subscription))
         mainViewModel.setPendingAutoConnect(true)
         lifecycleScope.launch(Dispatchers.IO) {
@@ -216,7 +218,7 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
      * if it is already running. Handles the VPN permission dialog if needed.
      */
     private fun connectToFastestServer(guid: String) {
-        MmkvManager.setSelectServer(guid)
+        // select already set in MainViewModel.onTestsFinished; avoid double write
         if (mainViewModel.isRunning.value == true) {
             restartV2Ray()
         } else if (SettingsManager.isVpnMode()) {

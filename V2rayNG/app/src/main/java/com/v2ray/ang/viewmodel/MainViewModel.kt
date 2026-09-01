@@ -54,6 +54,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         pendingAutoConnect = pending
     }
 
+    fun isPendingAutoConnect(): Boolean = pendingAutoConnect
+
+    fun consumeAutoConnect() {
+        autoConnectAction.value = ""
+    }
+
     /**
      * Refer to the official documentation for [registerReceiver](https://developer.android.com/reference/androidx/core/content/ContextCompat#registerReceiver(android.content.Context,android.content.BroadcastReceiver,android.content.IntentFilter,int):
      * `registerReceiver(Context, BroadcastReceiver, IntentFilter, int)`.
@@ -578,16 +584,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             withContext(Dispatchers.Main) {
                 reloadServerList()
-                if (shouldAutoConnect && !fastestGuid.isNullOrEmpty()) {
-                    autoConnectAction.value = fastestGuid
+                if (shouldAutoConnect) {
+                    if (!fastestGuid.isNullOrEmpty()) {
+                        autoConnectAction.value = fastestGuid
+                    } else {
+                        updateTestResultAction.value =
+                            getApplication<AngApplication>().getString(R.string.auto_action_no_server)
+                    }
                 }
             }
         }
     }
 
     fun onTestsCancelled() {
+        val wasPending = pendingAutoConnect
         isDownloadSpeedTestRunning = false
         pendingAutoConnect = false
+        if (wasPending) {
+            viewModelScope.launch(Dispatchers.Main) {
+                updateTestResultAction.value =
+                    getApplication<AngApplication>().getString(R.string.auto_action_no_server)
+            }
+        }
     }
 
     private val mMsgReceiver = object : BroadcastReceiver() {
