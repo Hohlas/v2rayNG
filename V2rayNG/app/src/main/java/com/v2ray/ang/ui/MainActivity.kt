@@ -81,7 +81,7 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
         setupNavigationDrawer()
 
         binding.fab.setOnClickListener { handleFabAction() }
-        binding.fabAuto.setOnClickListener { mainViewModel.startAutoAction() }
+        binding.fabAuto.setOnClickListener { handleAutoAction() }
         binding.layoutTest.setOnClickListener { handleLayoutTestClick() }
 
         setupGroupTab()
@@ -122,25 +122,6 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
         mainViewModel.updateTestResultAction.observe(this) { setTestState(it) }
         mainViewModel.isRunning.observe(this) { isRunning ->
             applyRunningState(false, isRunning)
-        }
-        mainViewModel.autoActionStatus.observe(this) { status ->
-            binding.fabAuto.isEnabled = !status.running
-            binding.fabAuto.setImageResource(
-                if (status.running) R.drawable.ic_fab_check else R.drawable.ic_auto_magic
-            )
-
-            if (status.refreshTabs) {
-                refreshGroupTabTitles()
-            }
-            if (status.connectNow) {
-                mainViewModel.consumeAutoActionConnect()
-                setTestState(getString(R.string.auto_action_connecting))
-                connectToFastestServer()
-            } else if (status.running) {
-                setTestState(status.message)
-            } else if (status.message != null) {
-                setTestState(status.message)
-            }
         }
         mainViewModel.startListenBroadcast()
         mainViewModel.initAssets(assets)
@@ -210,16 +191,25 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
         }
     }
 
+    private fun handleAutoAction() {
+        setTestState(getString(R.string.auto_action_updating_subscription))
+        lifecycleScope.launch(Dispatchers.IO) {
+            mainViewModel.updateConfigViaSubAll()
+            withContext(Dispatchers.Main) {
+                mainViewModel.reloadServerList()
+                refreshGroupTabTitles()
+                mainViewModel.testAllDownloadSpeed()
+                setTestState(getString(R.string.auto_action_speed_testing))
+            }
+        }
+    }
+
     /**
      * Connects to the currently selected (fastest) server, restarting the service
      * if it is already running. Handles the VPN permission dialog if needed.
      */
-    private fun connectToFastestServer() {
-        val guid = MmkvManager.getSelectServer()
-        if (guid.isNullOrEmpty()) {
-            toast(R.string.auto_action_no_server)
-            return
-        }
+    private fun connectToFastestServer(guid: String) {
+        MmkvManager.setSelectServer(guid)
         if (mainViewModel.isRunning.value == true) {
             restartV2Ray()
         } else if (SettingsManager.isVpnMode()) {
