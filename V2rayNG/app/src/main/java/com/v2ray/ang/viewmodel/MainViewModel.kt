@@ -429,17 +429,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun hasAnySpeedResult(keys: List<String>): Boolean =
+        keys.any { (MmkvManager.decodeServerAffiliationInfo(it)?.testSpeedMbps ?: 0.0) > 0.0 }
+
     private fun hasAnySpeedResult(): Boolean {
         val keys = if (subscriptionId.isEmpty()) {
             MmkvManager.decodeAllServerList()
         } else {
             MmkvManager.decodeServerList(subscriptionId)
         }
-        return keys.any { (MmkvManager.decodeServerAffiliationInfo(it)?.testSpeedMbps ?: 0.0) > 0.0 }
+        return hasAnySpeedResult(keys)
     }
 
     fun sortBySpeedWithFallback() {
-        if (hasAnySpeedResult()) {
+        val keys = if (subscriptionId.isEmpty()) {
+            MmkvManager.decodeAllServerList()
+        } else {
+            MmkvManager.decodeServerList(subscriptionId)
+        }
+        if (hasAnySpeedResult(keys)) {
             sortBySpeedTestResults()
         } else {
             sortByTestResults()

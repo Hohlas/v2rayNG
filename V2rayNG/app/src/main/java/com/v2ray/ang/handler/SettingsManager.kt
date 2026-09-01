@@ -42,7 +42,6 @@ object SettingsManager {
 
     fun initApp(context: Context) {
         ensureDefaultSettings()
-        migrateSpeedTestUrlIfNeeded()
         ensureDefaultSubscriptions()
         initRoutingRulesets(context)
         migrateServerListToSubscriptions()
@@ -445,15 +444,10 @@ object SettingsManager {
     }
 
     fun getSpeedTestUrls(): List<String> {
-        val savedUrls = getSpeedTestUrl()
-            .split(",", "\n", ";")
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-        val defaultUrls = AppConfig.SPEED_TEST_URL
-            .split(",")
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-        return (defaultUrls + savedUrls).distinct()
+        val url = getSpeedTestUrl().trim()
+        if (url.isEmpty()) return listOf(AppConfig.SPEED_TEST_URL)
+        val first = url.split(",", "\n", ";").map { it.trim() }.firstOrNull { it.isNotEmpty() } ?: AppConfig.SPEED_TEST_URL
+        return listOf(first)
     }
 
     fun getSpeedTestTimeoutMillis(): Int {
@@ -602,17 +596,6 @@ object SettingsManager {
         ensureDefaultValue(AppConfig.PREF_FRAGMENT_LENGTH, "50-100")
         ensureDefaultValue(AppConfig.PREF_FRAGMENT_INTERVAL, "10-20")
         ensureDefaultValue(AppConfig.PREF_FRAGMENT_MAXSPLIT, "10")
-    }
-
-    private fun migrateSpeedTestUrlIfNeeded() {
-        val current = MmkvManager.decodeSettingsString(AppConfig.PREF_SPEED_TEST_URL) ?: return
-        // 100 MB file caused Cloudflare 429 / timeouts; migrate 100000000 -> 10000000 automatically
-        if (current.contains("bytes=100000000")) {
-            MmkvManager.encodeSettings(
-                AppConfig.PREF_SPEED_TEST_URL,
-                current.replace("bytes=100000000", "bytes=10000000")
-            )
-        }
     }
 
     private fun ensureDefaultValue(key: String, default: String) {
